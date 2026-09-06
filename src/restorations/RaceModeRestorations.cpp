@@ -107,9 +107,10 @@ namespace RaceModeRestorations
 
     void InstallURLLapController()
     {
-        // Restores the lap count modifier in URL race options
-        injector::MakeNOP(0x4B3D4F, 2, true); // TONumLaps::Act
-        injector::MakeNOP(0x4CD976, 2, true); // UIQRModeOptions::SetupURL
+        // Unfreeze lap and opponent controllers in race mode options
+        injector::WriteMemory<uint8_t>(0x4B3E14, 0xEB, true); // Draw__9TONumLaps: Don't freeze laps
+        injector::WriteMemory<uint8_t>(0x4B3903, 0xEB, true); // Draw__18MO_QR_NumOpponents: Don't freeze opponents
+        injector::WriteMemory<uint8_t>(0x4B4068, 0xEB, true); // Act__7TOLapKO: Don't copy static numbers
     }
 
     void InstallRestartRaceAllModes()
