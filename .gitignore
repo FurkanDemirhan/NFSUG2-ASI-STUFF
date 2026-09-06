@@ -1,0 +1,30 @@
+# User data and binaries (never commit game files, reference repos, or binary databases)
+/GAME/
+/Bin-idb-i64/
+/Reference-Code/
+
+# Build outputs
+/build/
+bin/
+*.o
+*.obj
+*.a
+*.asi
+*.dll
+*.exe
+*.so
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+
+# System and IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+.direnv/
+.cache/
