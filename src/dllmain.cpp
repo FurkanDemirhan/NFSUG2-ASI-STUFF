@@ -7,6 +7,7 @@
 #include "restorations/RaceModeRestorations.h"
 #include "restorations/CustomizationRestorations.h"
 #include "restorations/GameplayRestorations.h"
+#include "restorations/EngineFixes.h"
 
 void InitRestorations()
 {
@@ -35,10 +36,40 @@ void InitRestorations()
         Logger::Log("[+] Restored: Outrun in QR, Free Run track select, Outrun track select");
     }
 
+    if (g_Config.restoreSprintDriftOpponents)
+    {
+        RaceModeRestorations::InstallSprintDriftOpponents();
+        Logger::Log("[+] Restored: AI opponents in Sprint Drift races");
+    }
+
+    if (g_Config.restoreURLLapController)
+    {
+        RaceModeRestorations::InstallURLLapController();
+        Logger::Log("[+] Restored: Lap count modifier in URL races");
+    }
+
+    if (g_Config.restoreRestartRaceInAllModes)
+    {
+        RaceModeRestorations::InstallRestartRaceAllModes();
+        Logger::Log("[+] Restored: Restart Race button for all game modes in Pause Menu");
+    }
+
     if (g_Config.restoreSpecialVinyls)
     {
         CustomizationRestorations::Install();
         Logger::Log("[+] Restored: Special Vinyls hidden category (0x1C)");
+    }
+
+    if (g_Config.fixDisappearingWheels)
+    {
+        EngineFixes::InstallWheelFix();
+        Logger::Log("[+] Applied: Disappearing wheels fix in CarPartCuller");
+    }
+
+    if (g_Config.enableDebugWorldCamera)
+    {
+        EngineFixes::InstallDebugWorldCamera();
+        Logger::Log("[+] Restored: Debug World Camera mover");
     }
 
     GameplayRestorations::Install();
