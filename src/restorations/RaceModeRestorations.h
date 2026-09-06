@@ -6,4 +6,7 @@ namespace RaceModeRestorations
     void InstallSprintDriftOpponents();
     void InstallURLLapController();
     void InstallRestartRaceAllModes();
+    void InstallBarrierCrashFix();
+    void InstallCareerLockedBarriersFix();
+    void InstallAnyTrackInAnyMode();
 }

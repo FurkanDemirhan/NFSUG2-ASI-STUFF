@@ -69,6 +69,10 @@ Only project source, scripts, environment, and documentation are tracked by Git:
 - [x] Statically linked plugin eliminating `libmcfgthread-2.dll` dependency.
 - [x] Successfully verified live loading and execution under Wine with `WINEDLLOVERRIDES="dinput8=n,b"`.
 - [x] Runtime log generated and validated: `GAME/PC/NFSU2CodeRestoration.log`.
+- [x] Implemented Track 4000 & Barrier Crash Fixes:
+  - **Barrier Crash Prevention**: Naked hook at `0x578070` inside `sub_578060`. Detects Track 4000 (Bayview City) and tracks lacking barrier packages, redirecting format strings `"BARRIERS_%d"` (`0x7A0794`) and `"PLAYER_BARRIERS_%d"` (`0x7A0780`) to `"BARRMERS_%d"` (`0x7A078B` = 'M', `0x7A0798` = 'M'). This cleanly bypasses `TrackStreamer` (`0x883E70`) registration and prevents fatal crashes during race transition.
+  - **Career Locked Area Barriers**: Patches `0x7A073C` (`"BARRIERS_CAREER%d"`) to `'M'` to remove career neon gates.
+  - **Any Track in Any Mode Hook**: Hooked `UIQRTrackSelect::BuildPresetTrackList` at `0x4CDEF5` to allow all valid race tracks and Track 4000 in any mode while safely filtering dummy/unpopulated stubs (1001-1003, 1099, 1102, 3001, 4200, etc.).
 
 ---
 

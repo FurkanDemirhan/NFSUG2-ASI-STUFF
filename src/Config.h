@@ -15,6 +15,12 @@ struct PluginConfig
     bool fixDisappearingWheels         = true;
     bool enableDebugWorldCamera        = false;
 
+    // Track & Barrier Options
+    bool fixMissingBarriersCrash       = true;
+    bool unlockAnyTrackInAnyMode       = true;
+    bool removeRaceBarriers            = false;
+    bool removeLockedAreaBarriers      = true;
+
     // Hotkeys
     int  hotkeyAutoDrive               = 117; // F6
     int  hotkeyUnlockAll               = 116; // F5

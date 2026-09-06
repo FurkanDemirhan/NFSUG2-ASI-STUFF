@@ -16,6 +16,11 @@ void PluginConfig::Load(const char* iniPath)
     restoreSpecialVinyls         = ini.ReadInteger("Restorations", "RestoreSpecialVinyls", 1) != 0;
 
     fixDisappearingWheels        = ini.ReadInteger("Fixes", "FixDisappearingWheels", 1) != 0;
+    fixMissingBarriersCrash      = ini.ReadInteger("Fixes", "FixMissingBarriersCrash", 1) != 0;
+    removeLockedAreaBarriers     = ini.ReadInteger("Fixes", "RemoveLockedAreaBarriers", 1) != 0;
+    removeRaceBarriers           = ini.ReadInteger("Gameplay", "RemoveRaceBarriers", 0) != 0;
+    unlockAnyTrackInAnyMode      = ini.ReadInteger("Menu", "UnlockAnyTrackInAnyMode", 1) != 0;
+
     enableDebugWorldCamera       = ini.ReadInteger("Debugging", "EnableDebugWorldCamera", 0) != 0;
 
     enableHotkeys                = ini.ReadInteger("Gameplay", "EnableDebugHotkeys", 1) != 0;

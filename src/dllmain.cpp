@@ -60,6 +60,24 @@ void InitRestorations()
         Logger::Log("[+] Restored: Special Vinyls hidden category (0x1C)");
     }
 
+    if (g_Config.fixMissingBarriersCrash)
+    {
+        RaceModeRestorations::InstallBarrierCrashFix();
+        Logger::Log("[+] Applied: Missing barrier crash fix for Track 4000 and non-barrier tracks");
+    }
+
+    if (g_Config.removeLockedAreaBarriers)
+    {
+        RaceModeRestorations::InstallCareerLockedBarriersFix();
+        Logger::Log("[+] Applied: Career locked area barriers removal");
+    }
+
+    if (g_Config.unlockAnyTrackInAnyMode)
+    {
+        RaceModeRestorations::InstallAnyTrackInAnyMode();
+        Logger::Log("[+] Restored: Any Track in Any Race Mode (with crashy stub filtering)");
+    }
+
     if (g_Config.fixDisappearingWheels)
     {
         EngineFixes::InstallWheelFix();
