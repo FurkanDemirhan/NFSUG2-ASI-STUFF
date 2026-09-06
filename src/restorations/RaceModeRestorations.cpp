@@ -101,7 +101,7 @@ extern "C" void __cdecl SetupBurnout_TrackHelper()
 
     *(uint32_t*)0x0089E7A0 = trackId;
     *(uint32_t*)0x0089E7A4 = direction;
-    *(uint32_t*)0x0089E7BC = laps;
+    *(uint32_t*)0x0089E7B4 = laps; // 0x89E7B4 is LAPS
 }
 
 __attribute__((naked)) static void SetupBurnout_TrackCave()
@@ -111,7 +111,7 @@ __attribute__((naked)) static void SetupBurnout_TrackCave()
         "pushad\n"
         "call _SetupBurnout_TrackHelper\n"
         "popad\n"
-        "push 0x00526808\n" // Return to SetupBurnout (mov dword ptr [0x89e7b4], esi)
+        "push 0x0052680E\n" // Return to SetupBurnout after `mov dword ptr [0x89e7b4], esi`
         "ret\n"
         ".att_syntax prefix\n"
     );
@@ -305,6 +305,77 @@ __attribute__((naked)) static void Minimap_Coords_SafeCall_Cave()
     );
 }
 
+// In-game HUD bundle streaming cave: ensure Global\InGameDrift.bun is streamed for Burnout mode
+__attribute__((naked)) static void StreamBundle_DriftBurnout_Cave()
+{
+    asm volatile (
+        ".intel_syntax noprefix\n"
+        "mov cl, byte ptr [0x89E7D9]\n" // isDrift
+        "test cl, cl\n"
+        "jne 1f\n"
+        "mov cl, byte ptr [0x89E7E2]\n" // isBurnout
+        "test cl, cl\n"
+        "jne 1f\n"
+        "cmp dword ptr [0x890104], edi\n"
+        "je 2f\n"
+        "1:\n"
+        "mov eax, 0x7A0C6C\n"          // Global\\InGameDrift.bun
+        "push 0x0057F389\n"             // Jump to jmp 0x57f3a1
+        "ret\n"
+        "2:\n"
+        "push 0x0057F38B\n"             // Jump to cmp dword ptr [0x89e7b0], edi
+        "ret\n"
+        ".att_syntax prefix\n"
+    );
+}
+
+// Hook post-race mode check at 0x4D7240 to route Burnout and Drift to drift score results
+__attribute__((naked)) static void PostRace_ModeCheck_Cave()
+{
+    asm volatile (
+        ".intel_syntax noprefix\n"
+        "push ebp\n"
+        "push esi\n"
+        "mov ebp, ecx\n"
+        "mov al, byte ptr [0x89E7E2]\n" // isBurnout
+        "test al, al\n"
+        "jne 1f\n"
+        "mov al, byte ptr [0x89E7D9]\n" // isDrift
+        "test al, al\n"
+        "jne 1f\n"
+        "mov eax, dword ptr [0x89E7A0]\n"
+        "cmp eax, 0x104E\n"
+        "jl 2f\n"
+        "cmp eax, 0x1053\n"
+        "jg 2f\n"
+        "1:\n"
+        "push 0x004D7257\n"             // Drift post-race results (0x4bf140)
+        "ret\n"
+        "2:\n"
+        "push 0x004D7279\n"             // Circuit post-race results (0x4bf290)
+        "ret\n"
+        ".att_syntax prefix\n"
+    );
+}
+
+// Hook circuit post-race entry at 0x4BF2CF to prevent NULL dereference crashes when finisher is missing
+__attribute__((naked)) static void PostRace_Circuit_SafeEntry_Cave()
+{
+    asm volatile (
+        ".intel_syntax noprefix\n"
+        "mov ebp, dword ptr [eax + 8]\n"
+        "test ebp, ebp\n"
+        "jz 1f\n"
+        "mov eax, dword ptr [ebp + 4]\n"
+        "push 0x004BF2D5\n"
+        "ret\n"
+        "1:\n"
+        "push 0x004BF4BD\n"             // Clean exit of sub_004bf290 (pop ebp; pop ebx; pop edi; ...)
+        "ret\n"
+        ".att_syntax prefix\n"
+    );
+}
+
 namespace RaceModeRestorations
 {
     void Install()
@@ -390,6 +461,13 @@ namespace RaceModeRestorations
             injector::MakeJMP(0x4E2C8C, (void*)UIQRModeOptions_Setup_Cave, true);
             s_ModeOptionsHooked = true;
         }
+
+        // Install post-race crash protection
+        injector::MakeRangedNOP(0x004BF2CF, 0x004BF2D5, true);
+        injector::MakeJMP(0x004BF2CF, (void*)PostRace_Circuit_SafeEntry_Cave, true);
+
+        injector::MakeRangedNOP(0x004D7240, 0x004D7257, true);
+        injector::MakeJMP(0x004D7240, (void*)PostRace_ModeCheck_Cave, true);
     }
 
     void InstallBurnoutMode()
@@ -413,5 +491,17 @@ namespace RaceModeRestorations
 
         injector::MakeRangedNOP(0x004CAED6, 0x004CAEDD, true);
         injector::MakeJMP(0x004CAED6, (void*)Minimap_Coords_SafeCall_Cave, true);
+
+        // 4. Hook bundle streaming at 0x57F372 to stream Global\InGameDrift.bun for Burnout mode HUD
+        injector::MakeRangedNOP(0x0057F372, 0x0057F384, true);
+        injector::MakeJMP(0x0057F372, (void*)StreamBundle_DriftBurnout_Cave, true);
+
+        // 5. Hook post-race mode check at 0x4D7240 to route Burnout to Drift results
+        injector::MakeRangedNOP(0x004D7240, 0x004D7257, true);
+        injector::MakeJMP(0x004D7240, (void*)PostRace_ModeCheck_Cave, true);
+
+        // 6. Hook circuit post-race entry at 0x4BF2CF to prevent NULL dereference crashes
+        injector::MakeRangedNOP(0x004BF2CF, 0x004BF2D5, true);
+        injector::MakeJMP(0x004BF2CF, (void*)PostRace_Circuit_SafeEntry_Cave, true);
     }
 }
