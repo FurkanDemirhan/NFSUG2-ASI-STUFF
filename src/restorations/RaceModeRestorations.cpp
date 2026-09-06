@@ -224,8 +224,9 @@ extern "C" void __cdecl AddExtraQRModes(void* screen)
         void* itemKO = allocFn(0x48);
         if (itemKO)
         {
-            // 0x03932CDC = "GT" label in English.bin; 0xe9638d3e = Circuit icon
-            constructFn(itemKO, 0x03932CDC, 0xe9638d3e, 0);
+            // 0xBF5AC5A9 = Official Lap Knockout icon from mode icon table
+            // 0x7FD73849 = Official "Lap KO" text label from English.bin (localized across all languages)
+            constructFn(itemKO, 0xBF5AC5A9, 0x7FD73849, 0);
             *(uint32_t*)itemKO = (uint32_t)&s_Vtable_MSLapKO;
             addItemFn(screen, itemKO);
         }
@@ -236,8 +237,9 @@ extern "C" void __cdecl AddExtraQRModes(void* screen)
         void* itemBurnout = allocFn(0x48);
         if (itemBurnout)
         {
-            // 0x63078970 = "Burnout" label in English.bin; 0x119144 = Drift icon
-            constructFn(itemBurnout, 0x63078970, 0x119144, 0);
+            // 0x00119144 = Drift tire-smoke icon from mode icon table
+            // 0x63078970 = Official "Burnout" text label from English.bin (localized across all languages)
+            constructFn(itemBurnout, 0x00119144, 0x63078970, 0);
             *(uint32_t*)itemBurnout = (uint32_t)&s_Vtable_MSBurnout;
             addItemFn(screen, itemBurnout);
         }
@@ -257,6 +259,48 @@ __attribute__((naked)) static void UIQRModeSelect_Setup_Cave()
         "mov edi, [esi + 0x4C]\n"
         "push 0x004B2FE6\n"
         "ret\n"
+        ".att_syntax prefix\n"
+    );
+}
+
+// Minimap safe call caves to prevent NULL dereference crashes when HUD lacks minimap element (HUD_Drift.fng)
+__attribute__((naked)) static void Minimap_Tick_SafeCall_Cave()
+{
+    asm volatile (
+        ".intel_syntax noprefix\n"
+        "test eax, eax\n"
+        "jz 1f\n"
+        "mov ecx, eax\n"
+        "call 0x004AC2B0\n"
+        "push 0x004CA912\n"
+        "ret\n"
+        "1:\n"
+        "add esp, 8\n"       // Clean the 2 pushed arguments for 0x4AC2B0
+        "pop edi\n"          // Restore saved registers from Tick__7Minimap prologue
+        "pop esi\n"
+        "pop ebx\n"
+        "add esp, 0x64\n"    // Clean local stack frame
+        "ret\n"              // Exit Tick__7Minimap cleanly
+        ".att_syntax prefix\n"
+    );
+}
+
+__attribute__((naked)) static void Minimap_Coords_SafeCall_Cave()
+{
+    asm volatile (
+        ".intel_syntax noprefix\n"
+        "test eax, eax\n"
+        "jz 1f\n"
+        "mov ecx, eax\n"
+        "call 0x004AC2B0\n"
+        "push 0x004CAEDD\n"
+        "ret\n"
+        "1:\n"
+        "add esp, 8\n"       // Clean the 2 pushed arguments for 0x4AC2B0
+        "xor al, al\n"       // Return false (cannot convert coords without minimap)
+        "mov esp, ebp\n"
+        "pop ebp\n"
+        "ret 0x10\n"         // Exit sub_004cae60 cleanly
         ".att_syntax prefix\n"
     );
 }
@@ -362,5 +406,12 @@ namespace RaceModeRestorations
             injector::MakeJMP(0x4E2C8C, (void*)UIQRModeOptions_Setup_Cave, true);
             s_ModeOptionsHooked = true;
         }
+
+        // 3. Hook Minimap tick and coords conversion to prevent NULL dereference crashes when HUD lacks minimap (HUD_Drift.fng)
+        injector::MakeRangedNOP(0x004CA90B, 0x004CA912, true);
+        injector::MakeJMP(0x004CA90B, (void*)Minimap_Tick_SafeCall_Cave, true);
+
+        injector::MakeRangedNOP(0x004CAED6, 0x004CAEDD, true);
+        injector::MakeJMP(0x004CAED6, (void*)Minimap_Coords_SafeCall_Cave, true);
     }
 }
