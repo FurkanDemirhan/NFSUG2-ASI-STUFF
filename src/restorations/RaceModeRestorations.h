@@ -9,4 +9,6 @@ namespace RaceModeRestorations
     void InstallBarrierCrashFix();
     void InstallCareerLockedBarriersFix();
     void InstallAnyTrackInAnyMode();
+    void InstallScrappedRaceModes();
+    void InstallBurnoutMode();
 }

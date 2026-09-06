@@ -10,6 +10,8 @@ struct PluginConfig
     bool restoreURLLapController       = true;
     bool restoreRestartRaceInAllModes  = true;
     bool restoreSpecialVinyls          = true;
+    bool restoreBurnoutMode            = true;
+    bool restoreLapKOInQR              = true;
 
     // Fixes & Debugging
     bool fixDisappearingWheels         = true;

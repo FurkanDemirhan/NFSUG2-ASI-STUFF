@@ -14,6 +14,8 @@ void PluginConfig::Load(const char* iniPath)
     restoreURLLapController      = ini.ReadInteger("Restorations", "RestoreURLLapController", 1) != 0;
     restoreRestartRaceInAllModes = ini.ReadInteger("Restorations", "RestoreRestartRaceInAllModes", 1) != 0;
     restoreSpecialVinyls         = ini.ReadInteger("Restorations", "RestoreSpecialVinyls", 1) != 0;
+    restoreBurnoutMode           = ini.ReadInteger("Restorations", "RestoreBurnoutMode", 1) != 0;
+    restoreLapKOInQR             = ini.ReadInteger("Restorations", "RestoreLapKOInQR", 1) != 0;
 
     fixDisappearingWheels        = ini.ReadInteger("Fixes", "FixDisappearingWheels", 1) != 0;
     fixMissingBarriersCrash      = ini.ReadInteger("Fixes", "FixMissingBarriersCrash", 1) != 0;

@@ -60,6 +60,18 @@ void InitRestorations()
         Logger::Log("[+] Restored: Special Vinyls hidden category (0x1C)");
     }
 
+    if (g_Config.restoreBurnoutMode)
+    {
+        RaceModeRestorations::InstallBurnoutMode();
+        Logger::Log("[+] Restored: Burnout / Smokeshow mode (fixed track override and options dispatcher)");
+    }
+
+    if (g_Config.restoreBurnoutMode || g_Config.restoreLapKOInQR)
+    {
+        RaceModeRestorations::InstallScrappedRaceModes();
+        Logger::Log("[+] Restored: Beta/Cut race modes in Quick Race (Burnout, Lap Knockout / GT)");
+    }
+
     if (g_Config.fixMissingBarriersCrash)
     {
         RaceModeRestorations::InstallBarrierCrashFix();
