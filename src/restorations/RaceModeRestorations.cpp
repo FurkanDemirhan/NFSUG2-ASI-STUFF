@@ -93,15 +93,10 @@ extern "C" void __cdecl SetupBurnout_TrackHelper()
     }
 
     uint32_t direction = *(uint32_t*)0x0083ABAC;
-    uint16_t laps = *(uint16_t*)0x0083ABAA;
-    if (laps == 0)
-    {
-        laps = 2;
-    }
 
     *(uint32_t*)0x0089E7A0 = trackId;
     *(uint32_t*)0x0089E7A4 = direction;
-    *(uint32_t*)0x0089E7B4 = laps; // 0x89E7B4 is LAPS
+    *(uint32_t*)0x0089E7B4 = 0; // Burnout mode is a solo burnout event (0 laps)
 }
 
 __attribute__((naked)) static void SetupBurnout_TrackCave()
@@ -305,29 +300,6 @@ __attribute__((naked)) static void Minimap_Coords_SafeCall_Cave()
     );
 }
 
-// In-game HUD bundle streaming cave: ensure Global\InGameDrift.bun is streamed for Burnout mode
-__attribute__((naked)) static void StreamBundle_DriftBurnout_Cave()
-{
-    asm volatile (
-        ".intel_syntax noprefix\n"
-        "mov cl, byte ptr [0x89E7D9]\n" // isDrift
-        "test cl, cl\n"
-        "jne 1f\n"
-        "mov cl, byte ptr [0x89E7E2]\n" // isBurnout
-        "test cl, cl\n"
-        "jne 1f\n"
-        "cmp dword ptr [0x890104], edi\n"
-        "je 2f\n"
-        "1:\n"
-        "mov eax, 0x7A0C6C\n"          // Global\\InGameDrift.bun
-        "push 0x0057F389\n"             // Jump to jmp 0x57f3a1
-        "ret\n"
-        "2:\n"
-        "push 0x0057F38B\n"             // Jump to cmp dword ptr [0x89e7b0], edi
-        "ret\n"
-        ".att_syntax prefix\n"
-    );
-}
 
 // Hook post-race mode check at 0x4D7240 to route Burnout and Drift to drift score results
 __attribute__((naked)) static void PostRace_ModeCheck_Cave()
@@ -492,9 +464,9 @@ namespace RaceModeRestorations
         injector::MakeRangedNOP(0x004CAED6, 0x004CAEDD, true);
         injector::MakeJMP(0x004CAED6, (void*)Minimap_Coords_SafeCall_Cave, true);
 
-        // 4. Hook bundle streaming at 0x57F372 to stream Global\InGameDrift.bun for Burnout mode HUD
-        injector::MakeRangedNOP(0x0057F372, 0x0057F384, true);
-        injector::MakeJMP(0x0057F372, (void*)StreamBundle_DriftBurnout_Cave, true);
+        // 4. Route Burnout mode HUD to HUD_SingleRace.fng from InGameRace.bun (bypasses broken HUD_Drift.fng)
+        // 0x005F19A2 to 0x005F19B2 (16 bytes)
+        injector::MakeRangedNOP(0x005F19A2, 0x005F19B2, true);
 
         // 5. Hook post-race mode check at 0x4D7240 to route Burnout to Drift results
         injector::MakeRangedNOP(0x004D7240, 0x004D7257, true);
