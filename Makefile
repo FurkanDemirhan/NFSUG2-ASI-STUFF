@@ -1,6 +1,6 @@
 CXX ?= i686-w64-mingw32-g++
-CXXFLAGS ?= -m32 -shared -std=c++17 -O2 -Wall -Wextra -Wno-unused-parameter -Wno-unknown-pragmas -Wno-deprecated-declarations -Wno-deprecated-copy -Wno-write-strings -static-libgcc -static-libstdc++ -I./src/includes -I./src
-LDFLAGS ?= -lkernel32 -luser32 -lgdi32 -lwinmm
+CXXFLAGS ?= -m32 -shared -std=c++17 -O2 -Wall -Wextra -Wno-unused-parameter -Wno-unknown-pragmas -Wno-deprecated-declarations -Wno-deprecated-copy -Wno-write-strings -Wno-implicit-fallthrough -static -static-libgcc -static-libstdc++ -I./src/includes -I./src
+LDFLAGS ?= -static -static-libgcc -static-libstdc++ -lkernel32 -luser32 -lgdi32 -lwinmm
 
 TARGET_NAME = NFSU2CodeRestoration.asi
 BUILD_DIR = build
