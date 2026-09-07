@@ -6,6 +6,26 @@
 
 static FILE* s_LogFile = nullptr;
 
+static void LogAddressInfo(const char* prefix, uintptr_t addr)
+{
+    HMODULE hMod = NULL;
+    if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                           (LPCSTR)addr, &hMod) && hMod)
+    {
+        char modPath[MAX_PATH] = {0};
+        GetModuleFileNameA(hMod, modPath, MAX_PATH);
+        char* modName = strrchr(modPath, '\\');
+        if (!modName) modName = strrchr(modPath, '/');
+        modName = modName ? modName + 1 : modPath;
+        uintptr_t offset = addr - (uintptr_t)hMod;
+        Logger::Log("%s0x%08lX (%s+0x%lX, base=0x%08lX)", prefix, (unsigned long)addr, modName, (unsigned long)offset, (unsigned long)hMod);
+    }
+    else
+    {
+        Logger::Log("%s0x%08lX", prefix, (unsigned long)addr);
+    }
+}
+
 static LONG WINAPI VectoredCrashHandler(PEXCEPTION_POINTERS pExceptionInfo)
 {
     DWORD code = pExceptionInfo->ExceptionRecord->ExceptionCode;
@@ -27,7 +47,20 @@ static LONG WINAPI VectoredCrashHandler(PEXCEPTION_POINTERS pExceptionInfo)
         uintptr_t esp = pExceptionInfo->ContextRecord->Esp;
 
         Logger::Log("==================================================");
-        Logger::Log("[CRASH] FATAL EXCEPTION 0x%08lX at address 0x%08lX", (unsigned long)code, (unsigned long)eip);
+        Logger::Log("[CRASH] FATAL EXCEPTION 0x%08lX", (unsigned long)code);
+        LogAddressInfo("[CRASH] Faulting Address: ", eip);
+
+        if (!IsBadReadPtr((const void*)eip, 16))
+        {
+            const unsigned char* bytes = (const unsigned char*)eip;
+            char hexBuf[64] = {0};
+            for (int i = 0; i < 16; i++)
+            {
+                sprintf(hexBuf + i * 3, "%02X ", bytes[i]);
+            }
+            Logger::Log("[CRASH] Code bytes at EIP: %s", hexBuf);
+        }
+
         Logger::Log("[CRASH] Registers:");
         Logger::Log("[CRASH]   EAX=0x%08lX EBX=0x%08lX ECX=0x%08lX EDX=0x%08lX", 
                     (unsigned long)eax, (unsigned long)ebx, (unsigned long)ecx, (unsigned long)edx);
@@ -35,12 +68,14 @@ static LONG WINAPI VectoredCrashHandler(PEXCEPTION_POINTERS pExceptionInfo)
                     (unsigned long)esi, (unsigned long)edi, (unsigned long)ebp, (unsigned long)esp);
 
         uintptr_t* stack = (uintptr_t*)esp;
-        if (!IsBadReadPtr(stack, 64))
+        if (!IsBadReadPtr(stack, 128))
         {
             Logger::Log("[CRASH] Stack dump (ESP):");
-            for (int i = 0; i < 16; i++)
+            for (int i = 0; i < 32; i++)
             {
-                Logger::Log("[CRASH]   [ESP+0x%02X] = 0x%08lX", i * 4, (unsigned long)stack[i]);
+                char prefix[32];
+                sprintf(prefix, "[CRASH]   [ESP+0x%02X] = ", i * 4);
+                LogAddressInfo(prefix, stack[i]);
             }
         }
         Logger::Log("==================================================");

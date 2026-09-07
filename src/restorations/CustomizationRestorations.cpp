@@ -12,10 +12,12 @@ __attribute__((naked)) static void VinylCategoryCodeCave()
         "push 0x93EC1CE9\n"      // NFSU2 Icon Hash
         "push 0x1C\n"            // Hidden vinyl category ID
         "mov ecx, esi\n"
-        "call 0x545920\n"        // AddCustomElementToMenu
+        "mov eax, 0x545920\n"
+        "call eax\n"        // AddCustomElementToMenu
         "mov eax, [esi + 4]\n"
         "push eax\n"
-        "call 0x505450\n"        // FEHashUpper
+        "mov edx, 0x505450\n"
+        "call edx\n"        // FEHashUpper
         "push 0x546265\n"
         "ret\n"
         ".att_syntax prefix\n"

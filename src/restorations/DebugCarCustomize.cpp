@@ -13,7 +13,8 @@ __attribute__((naked)) static void DebugCarCustomizeCodeCave()
         "mov ecx, edi\n"
         "call dword ptr [edx + 0x18]\n"
         "push 0x4C\n"
-        "call 0x575620\n"        // j__malloc
+        "mov eax, 0x575620\n"
+        "call eax\n"        // j__malloc
         "add esp, 4\n"
         "cmp eax, ebx\n"
         "je 1f\n"
@@ -22,7 +23,9 @@ __attribute__((naked)) static void DebugCarCustomizeCodeCave()
         "push 0x74CE8C0B\n"      // UI_ICON_DEBUG
         "push 0x04\n"            // StateID 4 = UI_DebugCarCustomize.fng
         "mov ecx, eax\n"
-        "call 0x520CB0\n"        // AddElementToMenuWithStateID
+        "mov edx, 0x520CB0\n"
+        "call edx\n"        // AddElementToMenuWithStateID
+        "mov edx, [edi]\n"  // reload edx in case clobbered
         "push eax\n"
         "mov ecx, edi\n"
         "call dword ptr [edx + 0x18]\n"
