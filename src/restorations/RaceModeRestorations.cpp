@@ -1,4 +1,5 @@
 #include "RaceModeRestorations.h"
+#include "FEngRestorations.h"
 #include "../GameAddresses.h"
 #include "../Config.h"
 #include "../Logger.h"
@@ -82,7 +83,12 @@ static bool __stdcall UIQRTrackSelect_IsAvailable(int TrackInfoBlock, int eTrack
     return true;
 }
 
-extern "C" const char s_HUDCarShowPackage[] asm("_s_HUDCarShowPackage") = "HUD_CarShow.fng";
+extern "C" const char* __cdecl Burnout_GetHUDPackageName() asm("_Burnout_GetHUDPackageName");
+const char* __cdecl Burnout_GetHUDPackageName()
+{
+    FEngRestorations::InstallEmbeddedHUDCarShow();
+    return "HUD_CarShow.fng";
+}
 
 __attribute__((naked)) static void Burnout_HUDChooser_Cave()
 {
@@ -91,8 +97,12 @@ __attribute__((naked)) static void Burnout_HUDChooser_Cave()
         "mov al, byte ptr [0x89E7E2]\n" // isBurnout
         "test al, al\n"
         "jz 1f\n"
-        // In Burnout mode, assign HUD_CarShow.fng
-        "mov eax, offset _s_HUDCarShowPackage\n"
+        // In Burnout mode, install embedded HUD_CarShow.fng and assign
+        "push ecx\n"
+        "push edx\n"
+        "call _Burnout_GetHUDPackageName\n"
+        "pop edx\n"
+        "pop ecx\n"
         "mov dword ptr [esp + 0x14], eax\n"
         "push 0x005F19EA\n"
         "ret\n"
@@ -106,6 +116,7 @@ __attribute__((naked)) static void Burnout_HUDChooser_Cave()
 
 extern "C" void __cdecl SetupBurnout_Custom()
 {
+    FEngRestorations::InstallEmbeddedHUDCarShow();
     *(uint8_t*)0x0089E7E2 = 1; // isBurnout = 1
     *(uint8_t*)0x0089E7D9 = 0; // isDrift = 0
 
