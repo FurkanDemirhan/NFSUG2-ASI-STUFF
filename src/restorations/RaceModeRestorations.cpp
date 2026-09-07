@@ -1,6 +1,7 @@
 #include "RaceModeRestorations.h"
 #include "../GameAddresses.h"
 #include "../Config.h"
+#include "../Logger.h"
 #include "../includes/injector/injector.hpp"
 #include "../includes/injector/hooking.hpp"
 
@@ -81,40 +82,104 @@ static bool __stdcall UIQRTrackSelect_IsAvailable(int TrackInfoBlock, int eTrack
     return true;
 }
 
-// Helpers and caves for Burnout and Scrapped Race Modes
+extern "C" const char s_HUDCarShowPackage[] asm("_s_HUDCarShowPackage") = "HUD_CarShow.fng";
 
-extern "C" void __cdecl SetupBurnout_TrackHelper()
-{
-    // Read player's selected track from RaceParameters for Mode 11 (0x0083ABA8)
-    uint16_t trackId = *(uint16_t*)0x0083ABA8;
-    if (trackId == 0 || trackId == 4097)
-    {
-        trackId = 4001; // Default to Track 1 if unselected or original crashy 4097
-    }
-
-    uint32_t direction = *(uint32_t*)0x0083ABAC;
-
-    *(uint32_t*)0x0089E7A0 = trackId;
-    *(uint32_t*)0x0089E7A4 = direction;
-    *(uint32_t*)0x0089E7B4 = 0; // Burnout mode is a solo burnout event (0 laps)
-}
-
-__attribute__((naked)) static void SetupBurnout_TrackCave()
+__attribute__((naked)) static void Burnout_HUDChooser_Cave()
 {
     asm volatile (
         ".intel_syntax noprefix\n"
-        "pushad\n"
-        "call _SetupBurnout_TrackHelper\n"
-        "popad\n"
-        "push 0x0052680E\n" // Return to SetupBurnout after `mov dword ptr [0x89e7b4], esi`
+        "mov al, byte ptr [0x89E7E2]\n" // isBurnout
+        "test al, al\n"
+        "jz 1f\n"
+        // In Burnout mode, assign HUD_CarShow.fng
+        "mov eax, offset _s_HUDCarShowPackage\n"
+        "mov dword ptr [esp + 0x14], eax\n"
+        "push 0x005F19EA\n"
+        "ret\n"
+        "1:\n"
+        // Normal circuit HUD (HUD_SingleRace.fng)
+        "push 0x005F19B2\n"
         "ret\n"
         ".att_syntax prefix\n"
     );
 }
 
+extern "C" void __cdecl SetupBurnout_Custom()
+{
+    *(uint8_t*)0x0089E7E2 = 1; // isBurnout = 1
+    *(uint8_t*)0x0089E7D9 = 0; // isDrift = 0
+
+    uint8_t numPlayers = *(uint8_t*)0x0083ABA0;
+    if (numPlayers == 0)
+    {
+        numPlayers = 1;
+    }
+    uint8_t numOpponents = *(uint8_t*)0x0083ABA1;
+    if (numOpponents > 3)
+    {
+        numOpponents = 3;
+    }
+    uint8_t difficulty = *(uint8_t*)0x0083ABA4;
+    uint8_t catchup = *(uint8_t*)0x0083ABA5;
+    uint16_t trackId = *(uint16_t*)0x0083ABA8;
+    uint16_t laps = *(uint16_t*)0x0083ABAA;
+    uint32_t direction = *(uint32_t*)0x0083ABAC;
+
+    if (trackId == 0 || trackId == 4097)
+    {
+        trackId = 4001; // Default to City Circuit 1
+    }
+    if (laps == 0)
+    {
+        void* trackInfo = ((void* (__cdecl*)(int))0x005D3E40)(trackId);
+        if (trackInfo)
+        {
+            laps = *(uint8_t*)((uintptr_t)trackInfo + 0x85);
+        }
+        if (laps == 0)
+        {
+            laps = 2;
+        }
+    }
+
+    *(uint32_t*)0x0089E7C0 = numPlayers;
+    *(uint32_t*)0x0089E7C4 = numOpponents;
+    *(uint32_t*)0x0089E7B0 = 1;
+    *(uint32_t*)0x0089E7A8 = difficulty;
+    *(uint32_t*)0x0089E7F8 = 0;
+    *(float*)0x0089E7FC = 1.0f;
+    *(float*)0x0089E800 = 1.0f;
+    *(uint32_t*)0x0089E7F4 = catchup;
+    *(uint8_t*)0x0089E7D2 = 0; // Disable smokeshow solo timeup timeout so standard laps apply
+    *(uint32_t*)0x0089E7A0 = trackId;
+    *(uint32_t*)0x0089E7A4 = direction;
+    *(uint32_t*)0x0089E7B4 = laps;
+    *(uint32_t*)0x0089E7BC = laps;
+    *(uint32_t*)0x007F68B0 = *(uint8_t*)0x0083AA1B;
+
+    Logger::Log("[Burnout] SetupBurnout_Custom: track=%d, laps=%d, dir=%d, players=%d, opps=%d, diff=%d",
+        trackId, laps, direction, numPlayers, numOpponents, difficulty);
+
+    // Call RaceStarter::SetupPlayerRacers(numPlayers, 0)
+    ((void (__cdecl*)(int, int))0x00525ED0)(numPlayers, 0);
+
+    if (numOpponents > 0)
+    {
+        ((void (__cdecl*)(int))0x0053EE90)(numOpponents); // RaceStarter::SetupOpponents
+        ((void (__cdecl*)(int))0x005264A0)(3);            // SetupGrid(3) -> 4-car starting grid
+        ((void (__cdecl*)())0x004FE9F0)();               // SetupStartingGrid()
+    }
+    else
+    {
+        ((void (__cdecl*)(int))0x005264A0)(1);            // SetupGrid(1) -> 1-car grid
+        ((void (__cdecl*)())0x004FE9F0)();               // SetupStartingGrid()
+    }
+}
+
 extern "C" void __cdecl UIQRModeOptions_Setup_Dispatcher(void* screen)
 {
     uint32_t mode = *(uint32_t*)0x0083AAB4;
+    Logger::Log("[QR] UIQRModeOptions_Setup_Dispatcher mode=%d, screen=0x%p", mode, screen);
     typedef void (__thiscall* SetupFn)(void* screen);
 
     switch (mode)
@@ -147,9 +212,31 @@ extern "C" void __cdecl UIQRModeOptions_Setup_Dispatcher(void* screen)
     case 10: // Street X
         ((SetupFn)0x004B47B0)(screen);
         break;
-    case 11: // Burnout
-        ((SetupFn)0x004CD7A0)(screen);
+    case 11: // Burnout (use Circuit options: Track, Laps, Direction, Opponents, Difficulty)
+    {
+        uint8_t* pNumPlayers = (uint8_t*)0x0083ABA0;
+        if (*pNumPlayers == 0)
+        {
+            *pNumPlayers = 1;
+        }
+        uint8_t* pNumOpponents = (uint8_t*)0x0083ABA1;
+        if (*pNumOpponents > 3)
+        {
+            *pNumOpponents = 3;
+        }
+        uint16_t* pTrackId = (uint16_t*)0x0083ABA8;
+        if (*pTrackId == 0 || *pTrackId == 4097)
+        {
+            *pTrackId = 4001;
+        }
+        uint16_t* pLaps = (uint16_t*)0x0083ABAA;
+        if (*pLaps == 0)
+        {
+            *pLaps = 2;
+        }
+        ((SetupFn)0x004CCF60)(screen);
         break;
+    }
     default:
         break;
     }
@@ -182,6 +269,26 @@ static void __thiscall MSBurnout_React(void* self, const char* name, unsigned in
 {
     if (event == 0x0C407210) // Select/Enter
     {
+        uint8_t* pNumPlayers = (uint8_t*)0x0083ABA0;
+        if (*pNumPlayers == 0)
+        {
+            *pNumPlayers = 1;
+        }
+        uint8_t* pNumOpponents = (uint8_t*)0x0083ABA1;
+        if (*pNumOpponents > 3)
+        {
+            *pNumOpponents = 3;
+        }
+        uint16_t* pTrackId = (uint16_t*)0x0083ABA8;
+        if (*pTrackId == 0 || *pTrackId == 4097)
+        {
+            *pTrackId = 4001;
+        }
+        uint16_t* pLaps = (uint16_t*)0x0083ABAA;
+        if (*pLaps == 0)
+        {
+            *pLaps = 2;
+        }
         ((void (__cdecl*)(int))0x004B2C00)(11); // Mode 11: Burnout
     }
 }
@@ -303,7 +410,8 @@ __attribute__((naked)) static void Minimap_Coords_SafeCall_Cave()
 }
 
 
-// Hook post-race mode check at 0x4D7240 to route Burnout and Drift to drift score results
+
+// Hook post-race mode check at 0x4D7240 to route Drift tracks to drift score results and others to circuit results
 __attribute__((naked)) static void PostRace_ModeCheck_Cave()
 {
     asm volatile (
@@ -311,9 +419,6 @@ __attribute__((naked)) static void PostRace_ModeCheck_Cave()
         "push ebp\n"
         "push esi\n"
         "mov ebp, ecx\n"
-        "mov al, byte ptr [0x89E7E2]\n" // isBurnout
-        "test al, al\n"
-        "jne 1f\n"
         "mov al, byte ptr [0x89E7D9]\n" // isDrift
         "test al, al\n"
         "jne 1f\n"
@@ -337,6 +442,11 @@ __attribute__((naked)) static void PostRace_Circuit_SafeEntry_Cave()
 {
     asm volatile (
         ".intel_syntax noprefix\n"
+        "lea edx, [edi + 0x4c]\n"       // edx = sentinel head of finisher list
+        "cmp eax, edx\n"                // empty list check (bList::Get returns head when empty)
+        "je 1f\n"
+        "cmp eax, ecx\n"
+        "je 1f\n"
         "mov ebp, dword ptr [eax + 8]\n"
         "test ebp, ebp\n"
         "jz 1f\n"
@@ -446,9 +556,30 @@ namespace RaceModeRestorations
 
     void InstallBurnoutMode()
     {
-        // 1. Hook SetupBurnout at 0x5267F8 to read player's chosen track rather than forcing 4097
-        injector::MakeRangedNOP(0x5267F8, 0x526808, true);
-        injector::MakeJMP(0x5267F8, (void*)SetupBurnout_TrackCave, true);
+        // 0. Ensure default parameters for Mode 11 are initialized in RaceParameters table
+        uint8_t* pNumPlayers = (uint8_t*)0x0083ABA0;
+        if (*pNumPlayers == 0)
+        {
+            *pNumPlayers = 1;
+        }
+        uint8_t* pNumOpponents = (uint8_t*)0x0083ABA1;
+        if (*pNumOpponents > 3)
+        {
+            *pNumOpponents = 3;
+        }
+        uint16_t* pTrackId = (uint16_t*)0x0083ABA8;
+        if (*pTrackId == 0 || *pTrackId == 4097)
+        {
+            *pTrackId = 4001;
+        }
+        uint16_t* pLaps = (uint16_t*)0x0083ABAA;
+        if (*pLaps == 0)
+        {
+            *pLaps = 2;
+        }
+
+        // 1. Hook entire SetupBurnout function at 0x526720 with custom opponents and laps setup
+        injector::MakeJMP(0x00526720, (void*)SetupBurnout_Custom, true);
 
         // 2. Ensure UIQRModeOptions::Setup is hooked for Burnout options
         static bool s_ModeOptionsHooked = false;
@@ -459,18 +590,18 @@ namespace RaceModeRestorations
             s_ModeOptionsHooked = true;
         }
 
-        // 3. Hook Minimap tick and coords conversion to prevent NULL dereference crashes when HUD lacks minimap (HUD_Drift.fng)
+        // 3. Hook Minimap tick and coords conversion to prevent NULL dereference crashes when HUD lacks minimap
         injector::MakeRangedNOP(0x004CA90B, 0x004CA912, true);
         injector::MakeJMP(0x004CA90B, (void*)Minimap_Tick_SafeCall_Cave, true);
 
         injector::MakeRangedNOP(0x004CAED6, 0x004CAEDD, true);
         injector::MakeJMP(0x004CAED6, (void*)Minimap_Coords_SafeCall_Cave, true);
 
-        // 4. Route Burnout mode HUD to HUD_SingleRace.fng from InGameRace.bun (bypasses broken HUD_Drift.fng)
-        // 0x005F19A2 to 0x005F19B2 (16 bytes)
+        // 4. Route Burnout mode HUD to HUD_CarShow.fng (falling back to HUD_SingleRace.fng)
         injector::MakeRangedNOP(0x005F19A2, 0x005F19B2, true);
+        injector::MakeJMP(0x005F19A2, (void*)Burnout_HUDChooser_Cave, true);
 
-        // 5. Hook post-race mode check at 0x4D7240 to route Burnout to Drift results
+        // 5. Hook post-race mode check at 0x4D7240 to route Burnout to Circuit results
         injector::MakeRangedNOP(0x004D7240, 0x004D7257, true);
         injector::MakeJMP(0x004D7240, (void*)PostRace_ModeCheck_Cave, true);
 

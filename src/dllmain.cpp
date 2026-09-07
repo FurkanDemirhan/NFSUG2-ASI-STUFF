@@ -8,6 +8,8 @@
 #include "restorations/CustomizationRestorations.h"
 #include "restorations/GameplayRestorations.h"
 #include "restorations/EngineFixes.h"
+#include "restorations/FEngRestorations.h"
+#include "restorations/BurnoutRestorations.h"
 
 void InitRestorations()
 {
@@ -101,6 +103,12 @@ void InitRestorations()
         EngineFixes::InstallDebugWorldCamera();
         Logger::Log("[+] Restored: Debug World Camera mover");
     }
+
+    FEngRestorations::Init();
+    Logger::Log("[+] Restored: Loose FNG package loader (supports cut/custom FNGs)");
+
+    BurnoutRestorations::Init();
+    Logger::Log("[+] Restored: Burnout / Smokeshow trick judging & scoring engine");
 
     GameplayRestorations::Install();
     Logger::Log("[+] Restored: Main loop tick and debugging hotkeys");

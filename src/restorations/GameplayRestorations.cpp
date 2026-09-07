@@ -53,10 +53,13 @@ static void GameTick()
     }
 }
 
+#include "BurnoutRestorations.h"
+
 // Periodic callback called from the main game loop at 0x581470
 static void __cdecl MainLoopHook()
 {
     GameTick();
+    BurnoutRestorations::Update(1.0f / 60.0f);
 }
 
 namespace GameplayRestorations
