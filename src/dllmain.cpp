@@ -10,6 +10,7 @@
 #include "restorations/EngineFixes.h"
 #include "restorations/FEngRestorations.h"
 #include "restorations/BurnoutRestorations.h"
+#include "restorations/VehicleDamageRestorations.h"
 
 void InitRestorations()
 {
@@ -98,6 +99,12 @@ void InitRestorations()
         Logger::Log("[+] Applied: Disappearing wheels fix in CarPartCuller");
     }
 
+    if (g_Config.fixAudioPathCrash)
+    {
+        EngineFixes::InstallPathStatusCrashFix();
+        Logger::Log("[+] Applied: Audio PATH_status null bank crash fix (0x0073927D)");
+    }
+
     if (g_Config.enableDebugWorldCamera)
     {
         EngineFixes::InstallDebugWorldCamera();
@@ -108,6 +115,12 @@ void InitRestorations()
     {
         BurnoutRestorations::Init();
         Logger::Log("[+] Restored: Burnout / Smokeshow trick judging & scoring engine");
+    }
+
+    if (g_Config.restoreVehicleDamage)
+    {
+        VehicleDamageRestorations::Install();
+        Logger::Log("[+] Restored: Vehicle part damage, 3-stage wobbling animations, and detachment");
     }
 
     GameplayRestorations::Install();

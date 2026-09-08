@@ -12,9 +12,11 @@ struct PluginConfig
     bool restoreSpecialVinyls          = true;
     bool restoreBurnoutMode            = true;
     bool restoreLapKOInQR              = true;
+    bool restoreVehicleDamage          = true;
 
     // Fixes & Debugging
     bool fixDisappearingWheels         = true;
+    bool fixAudioPathCrash             = true;
     bool enableDebugWorldCamera        = false;
 
     // Track & Barrier Options
@@ -26,6 +28,7 @@ struct PluginConfig
     // Hotkeys
     int  hotkeyAutoDrive               = 117; // F6
     int  hotkeyUnlockAll               = 116; // F5
+    int  hotkeyDamageCycle             = 118; // F7
     bool enableHotkeys                 = true;
 
     void Load(const char* iniPath);

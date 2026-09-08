@@ -16,8 +16,10 @@ void PluginConfig::Load(const char* iniPath)
     restoreSpecialVinyls         = ini.ReadInteger("Restorations", "RestoreSpecialVinyls", 1) != 0;
     restoreBurnoutMode           = ini.ReadInteger("Restorations", "RestoreBurnoutMode", 1) != 0;
     restoreLapKOInQR             = ini.ReadInteger("Restorations", "RestoreLapKOInQR", 1) != 0;
+    restoreVehicleDamage         = ini.ReadInteger("Gameplay", "RestoreVehicleDamage", ini.ReadInteger("Restorations", "RestoreVehicleDamage", 1)) != 0;
 
     fixDisappearingWheels        = ini.ReadInteger("Fixes", "FixDisappearingWheels", 1) != 0;
+    fixAudioPathCrash            = ini.ReadInteger("Fixes", "FixAudioPathCrash", 1) != 0;
     fixMissingBarriersCrash      = ini.ReadInteger("Fixes", "FixMissingBarriersCrash", 1) != 0;
     removeLockedAreaBarriers     = ini.ReadInteger("Fixes", "RemoveLockedAreaBarriers", 1) != 0;
     removeRaceBarriers           = ini.ReadInteger("Gameplay", "RemoveRaceBarriers", 0) != 0;
@@ -28,4 +30,5 @@ void PluginConfig::Load(const char* iniPath)
     enableHotkeys                = ini.ReadInteger("Gameplay", "EnableDebugHotkeys", 1) != 0;
     hotkeyAutoDrive              = ini.ReadInteger("Hotkeys", "AutoDrive", 117); // F6
     hotkeyUnlockAll              = ini.ReadInteger("Hotkeys", "UnlockAll", 116); // F5
+    hotkeyDamageCycle            = ini.ReadInteger("Hotkeys", "DamageCycle", 118); // F7
 }

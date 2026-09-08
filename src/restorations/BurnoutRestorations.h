@@ -15,7 +15,9 @@ namespace BurnoutRestorations
         TRICK_CCW_DONUT = 1,
         TRICK_S_CURVE = 2,
         TRICK_S_MIRROR = 3,
-        TRICK_FIGURE_8 = 4
+        TRICK_FIGURE_8 = 4,
+        TRICK_360_SPIN = 5,
+        TRICK_J_TURN = 6
     };
 
     struct BurnoutState
@@ -26,7 +28,8 @@ namespace BurnoutRestorations
         float accumulatedCCWAngle;
         float totalBurnoutDistance;
         float sessionScore;
-        int comboMultiplier;
+        float comboMultiplier;
+        int comboLevel;
         eBurnoutTrick lastTrick;
         float timeSinceLastTrick;
     };

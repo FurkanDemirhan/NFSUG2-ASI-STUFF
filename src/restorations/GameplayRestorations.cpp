@@ -1,4 +1,6 @@
 #include "GameplayRestorations.h"
+#include "BurnoutRestorations.h"
+#include "VehicleDamageRestorations.h"
 #include "../GameAddresses.h"
 #include "../Config.h"
 #include "../includes/injector/injector.hpp"
@@ -51,15 +53,23 @@ static void GameTick()
             injector::MakeNOP(0x50F0D8, 2, true); // Unlock individual performance parts
         }
     }
-}
 
-#include "BurnoutRestorations.h"
+    // 3. Cycle vehicle damage stage toggle (F7)
+    if (g_Config.restoreVehicleDamage && (GetAsyncKeyState(g_Config.hotkeyDamageCycle) & 1))
+    {
+        VehicleDamageRestorations::CyclePlayerDamage();
+    }
+}
 
 // Periodic callback called from the main game loop at 0x581470
 static void __cdecl MainLoopHook()
 {
     GameTick();
     BurnoutRestorations::Update(1.0f / 60.0f);
+    if (g_Config.restoreVehicleDamage)
+    {
+        VehicleDamageRestorations::Update(1.0f / 60.0f);
+    }
 }
 
 namespace GameplayRestorations

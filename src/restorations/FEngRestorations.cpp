@@ -57,10 +57,10 @@ namespace FEngRestorations
         }
 
         // Allocate persistent static chunk buffer inside .bss to avoid dynamic allocations
-        static uint8_t s_HUDCarShowChunk[8 + 50212];
-        if (g_HUD_CarShow_FNG_Size > 50212)
+        static uint8_t s_HUDCarShowChunk[8 + 65536];
+        if (g_HUD_CarShow_FNG_Size > 65536)
         {
-            Logger::Log("[FEng] Error: embedded HUD_CarShow size mismatch (%u > 50212)", (unsigned int)g_HUD_CarShow_FNG_Size);
+            Logger::Log("[FEng] Error: embedded HUD_CarShow size mismatch (%u > 65536)", (unsigned int)g_HUD_CarShow_FNG_Size);
             return false;
         }
 
