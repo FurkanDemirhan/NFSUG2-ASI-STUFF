@@ -13,7 +13,7 @@ To achieve high-accuracy restorations, we cross-reference the PC executable with
 ---
 
 ## 2. Technical Stack & Execution Model
-- **Host Platform**: NixOS (Linux). All commands must run inside `nix-shell` and only within the workspace directory.
+- **Host Platform**: NixOS (Linux). All build commands run inside `nix-shell` and only within the workspace directory.
 - **Nix Environment (`shell.nix`)**:
   - 32-bit MinGW toolchain: `i686-w64-mingw32-gcc` / `g++` (GCC 15.3.0).
   - Wine: `pkgs.wineWow64Packages.stagingFull`.
@@ -30,49 +30,101 @@ To achieve high-accuracy restorations, we cross-reference the PC executable with
 ## 3. Directory Layout & Git Policy
 Only project source, scripts, environment, and documentation are tracked by Git:
 - `src/` — C++ source code for the restoration `.asi` plugin:
-  - `src/dllmain.cpp`: Compatibility check against v1.2 NTSC entry point (`0x75BCC7`), orchestrates restorations.
-  - `src/Config.h` / `Config.cpp`: Reads `NFSU2CodeRestoration.ini`.
-  - `src/Logger.h` / `Logger.cpp`: Runtime logging to `NFSU2CodeRestoration.log`.
-  - `src/restorations/DebugCarCustomize.cpp`: Restores cut `UI_DebugCarCustomize.fng` into car customize menu.
-  - `src/restorations/CameraRestorations.cpp`: Restores all 5 camera POV modes (Driver, Bumper, Hood, Drift, Chase).
-  - `src/restorations/RaceModeRestorations.cpp`: Restores Outrun in Quick Race, Free Run/Outrun track select, AI opponents in Sprint Drift, URL lap count modifier, and "Restart Race" in Pause Menu across all modes.
-  - `src/restorations/CustomizationRestorations.cpp`: Restores hidden Special Vinyls category (`0x1C`).
-  - `src/restorations/EngineFixes.cpp`: Fixes disappearing wheels in `CarPartCuller` and enables internal `DebugWorldCameraMover`.
-  - `src/restorations/GameplayRestorations.cpp`: Main loop tick at `0x581470`, F6 Autopilot (`Player_AutoPilotOn/Off`), F5 Unlock All.
+  - [`src/dllmain.cpp`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src/dllmain.cpp): Compatibility check against v1.2 NTSC entry point (`0x75BCC7`), orchestrates restorations.
+  - [`src/Config.h`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src/Config.h) / [`src/Config.cpp`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src/Config.cpp): Reads and validates `NFSU2CodeRestoration.ini` settings and hotkeys.
+  - [`src/Logger.h`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src/Logger.h) / [`src/Logger.cpp`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src/Logger.cpp): Runtime logging to `NFSU2CodeRestoration.log` with crash handler.
+  - [`src/restorations/DebugCarCustomize.cpp`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src/restorations/DebugCarCustomize.cpp): Restores cut `UI_DebugCarCustomize.fng` into car customize menu.
+  - [`src/restorations/CameraRestorations.cpp`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src/restorations/CameraRestorations.cpp): Restores all 5 camera POV modes (Driver, Bumper, Hood, Drift, Chase).
+  - [`src/restorations/RaceModeRestorations.cpp`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src/restorations/RaceModeRestorations.cpp): Restores Outrun in Quick Race, Free Run/Outrun track select, AI opponents in Sprint Drift, URL lap count modifier, Pause Menu "Restart Race", Track 4000 barrier crash fix, Career locked area barrier removal, Any Track in Any Mode hook, and Lap Knockout / GT mode in Quick Race.
+  - [`src/restorations/BurnoutRestorations.cpp`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src/restorations/BurnoutRestorations.cpp) / [`src/restorations/BurnoutRestorations.h`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src/restorations/BurnoutRestorations.h): Restores Burnout / Smokeshow mode, trick judging engine, combo multipliers, and on-screen HUD popups (`SplitTimeText` / `RaceOverMessage`).
+  - [`src/restorations/FngData_HUD_CarShow.cpp`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src/restorations/FngData_HUD_CarShow.cpp): Restored and fixed binary package data for `HUD_CarShow.fng` (backing plates, minimap tracking, tachometer cleanups).
+  - [`src/restorations/VehicleDamageRestorations.cpp`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src/restorations/VehicleDamageRestorations.cpp) / [`src/restorations/VehicleDamageRestorations.h`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src/restorations/VehicleDamageRestorations.h): Restores cut vehicle part damage, 3-stage wobbling animations (`WINDOW_DAMAGE0..2`), dynamic flapping hinges (doors/trunk), collision impulse delivery, and severe crash detachment (`4.0f` threshold).
+  - [`src/restorations/CustomizationRestorations.cpp`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src/restorations/CustomizationRestorations.cpp): Restores hidden Special Vinyls category (`0x1C`).
+  - [`src/restorations/EngineFixes.cpp`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src/restorations/EngineFixes.cpp) / [`src/restorations/EngineFixes.h`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src/restorations/EngineFixes.h): Disappearing wheels fix in `CarPartCuller`, internal `DebugWorldCameraMover`, and `PATH_status` audio bank null crash fix (`0x0073927D`).
+  - [`src/restorations/GameplayRestorations.cpp`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src/restorations/GameplayRestorations.cpp): Main loop tick at `0x581470`, F6 Autopilot (`Player_AutoPilotOn/Off`), F5 Unlock All, F7 Cycle Damage Stages.
 - `scripts/` — Python reverse engineering utilities:
   - `scripts/dump_ida_symbols.py`: Exports functions and names from IDA `.i64` files.
   - `scripts/extract_ps2_symbols.py`: Extracts vtables, source paths, assertions, and strings from PS2 ELFs.
   - `scripts/query_symbols.py`: Instant CLI search across PC, GameCube, and PS2 symbol caches.
 - `shell.nix` — Reproducible Nix environment specification.
 - `Makefile` — Statically links runtime libraries (`-static`) and deploys to `GAME/PC/scripts/`.
-- `HANDOFF.md` — Project roadmap, architecture notes, and progress handoff.
+- [`HANDOFF.md`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/HANDOFF.md) — Project roadmap, architecture notes, and progress handoff.
+- [Walkthrough](file:///home/nebulafdv2/.gemini/antigravity-ide/brain/bfcba503-47f4-46b3-8827-f064bba9f584/walkthrough.md) — Detailed step-by-step documentation of all implemented features, bugfixes, and reverse-engineering findings.
 - `.gitignore` — Strictly ignores `GAME/`, `Bin-idb-i64/`, `Reference-Code/`, `build/`, `.venv/`, and `cache/`.
 
 ---
 
 ## 4. Current Status & Verified Restorations
-- [x] Initialized and verified `shell.nix` with MinGW 32-bit compiler and Wine staging.
-- [x] Extracted PC v1.2 symbols (4,065 named functions, 15,312 total).
-- [x] Extracted GameCube symbols (14,598 named functions — 99.9% coverage).
-- [x] Extracted PS2 Alpha 10 and Demo vtables and source tree paths (`/indep/src/...`).
-- [x] Cross-platform query tool (`scripts/query_symbols.py`).
-- [x] Implemented and verified Restorations:
-  - **Debug Car Customization**: Re-enabled cut `UI_DebugCarCustomize.fng` screen (StateID 4) in Customize Car menu.
-  - **Camera Modes**: Re-enabled all 5 camera POVs (Driver, Bumper, Hood, Drift, Chase) and scroll limit.
-  - **Quick Race Modes**: Restored Outrun in Quick Race menu, unlocked Free Run and Outrun track selection.
-  - **Sprint Drift AI**: Restored AI opponents and leaderboard scoring in Sprint Drift races.
-  - **URL Lap Controller**: Unlocked the lap modifier for URL races.
-  - **Pause Menu Restart**: Restored "Restart Race" button for URL tournaments, Outruns, and all game modes.
-  - **Special Vinyls**: Restored hidden vinyl category (`0x1C`).
-  - **Engine Fixes**: Disappearing wheels fix in `CarPartCuller`.
-  - **Main Loop & Hotkeys**: Per-frame tick hook at `0x581470` for F6 Autopilot (`Player_AutoPilotOn`) and F5 Unlock All.
-- [x] Statically linked plugin eliminating `libmcfgthread-2.dll` dependency.
-- [x] Successfully verified live loading and execution under Wine with `WINEDLLOVERRIDES="dinput8=n,b"`.
-- [x] Runtime log generated and validated: `GAME/PC/NFSU2CodeRestoration.log`.
-- [x] Implemented Track 4000 & Barrier Crash Fixes:
-  - **Barrier Crash Prevention**: Naked hook at `0x578070` inside `sub_578060`. Detects Track 4000 (Bayview City) and tracks lacking barrier packages, redirecting format strings `"BARRIERS_%d"` (`0x7A0794`) and `"PLAYER_BARRIERS_%d"` (`0x7A0780`) to `"BARRMERS_%d"` (`0x7A078B` = 'M', `0x7A0798` = 'M'). This cleanly bypasses `TrackStreamer` (`0x883E70`) registration and prevents fatal crashes during race transition.
-  - **Career Locked Area Barriers**: Patches `0x7A073C` (`"BARRIERS_CAREER%d"`) to `'M'` to remove career neon gates.
-  - **Any Track in Any Mode Hook**: Hooked `UIQRTrackSelect::BuildPresetTrackList` at `0x4CDEF5` to allow all valid race tracks and Track 4000 in any mode while safely filtering dummy/unpopulated stubs (1001-1003, 1099, 1102, 3001, 4200, etc.).
+
+### A. Core UI & Menu Restorations
+- [x] **Debug Car Customization**: Re-enabled cut `UI_DebugCarCustomize.fng` screen (StateID 4) in Customize Car menu.
+- [x] **Camera Modes**: Re-enabled all 5 camera POVs (Driver, Bumper, Hood, Drift, Chase) and scroll limit.
+- [x] **Quick Race Modes**: Restored Outrun mode, Free Run track selection, and Lap Knockout / GT mode (`Mode 9`).
+- [x] **Sprint Drift AI**: Restored AI opponents and leaderboard scoring in Sprint Drift races.
+- [x] **URL Lap Controller**: Unlocked lap modifier for URL races.
+- [x] **Pause Menu Restart**: Restored "Restart Race" button across URL tournaments, Outruns, and all modes.
+- [x] **Special Vinyls**: Restored hidden vinyl category (`0x1C`).
+- [x] **Main Loop & Hotkeys**: Per-frame tick hook at `0x581470` for F6 Autopilot (`Player_AutoPilotOn`), F5 Unlock All, and F7 Cycle Damage Stages.
+
+### B. Stability & Engine Crash Fixes
+- [x] **Audio `PATH_status` Fatal Crash Fix (`0x0073927D`)**:
+  - Fixed random `0xC0000005` access violation caused by multi-threaded audio cleanup zeroing `ds:0x8B7BB0`.
+  - Implemented recovery routine `GetOrRecoverCurrentPathBank()` and code cave at `0x00739274` that gracefully falls back if no audio bank is loaded.
+- [x] **Missing Barrier Crash Fix (Track 4000 & Custom Tracks)**:
+  - Naked hook at `0x578070` inside `sub_578060` redirecting `"BARRIERS_%d"` to `"BARRMERS_%d"`, bypassing `TrackStreamer` registration and eliminating race transition crashes.
+- [x] **Career Locked Area Barriers**:
+  - Patched `0x7A073C` (`"BARRIERS_CAREER%d"`) to `'M'`, eliminating neon barriers in Career mode.
+- [x] **Any Track in Any Mode Hook**:
+  - Hooked `UIQRTrackSelect::BuildPresetTrackList` at `0x4CDEF5` to allow all valid tracks while safely filtering unpopulated dummy stubs.
+- [x] **Disappearing Wheels Fix**:
+  - Patched `CarPartCuller::CullParts` at `0x60C5A9`.
+
+### C. Burnout / Smokeshow Mode & Trick Engine
+- [x] Restored `Mode 8` (`Smokeshow / Burnout`) in Quick Race menu and fixed Track 4097 override crash (`0x52481A`).
+- [x] Fixed HUD visual artifacts in `HUD_CarShow.fng`:
+  - Restored opaque dark backing boxes for lap counters, timer, and leaderboard rows (`0xFF000000` and `0xC0000000`).
+  - Remapped minimap track map to resource 15 (`Track4000_map.tga`), fixed player car blip hash (`0xC1347E2F`), and restored opponent car indicators.
+  - Relocated orphan PS2 Demo turbo text and gauge objects off-screen.
+- [x] Reverse-engineered and ported the PS2 Demo Burnout trick judging & scoring engine:
+  - Fixed player car pointer dereference bug (`0x008900AC` array indexing).
+  - Decoupled trick evaluation from tire slip score, allowing high-speed tricks (S-Curves, S-Mirrors, 360 Spins) to trigger.
+  - Implemented combo multipliers (`1.0x` up to `2.5x`) and chain window timeouts.
+  - Center-screen HUD trick popup banners (`SplitTimeText` & `RaceOverMessage` with `ZoomInGreen` animation).
+  - Restored tricks: `DONUT (CW/CCW)`, `FIGURE 8`, `S CURVE`, `S MIRROR`, `360 SPIN`, `J TURN`.
+
+### D. Vehicle Part Damage, Wobbling & Detachment Restoration
+- [x] **Global Engine Damage Activation**:
+  - Patched `0x00540033` (`0F 95 C0` -> `B0 01 90`) so race initialization writes `1` to `0x0089E7D2`.
+  - Set `g_CarDamageEnable` (`0x00870CCC`), `0x008764E4`, and NOPed graphics preset override at `0x005BE6F7`.
+  - Forced `0x0089E7D2 = 1` in per-frame tick.
+- [x] **Enabled All 6 Damage Parts**:
+  - Enabled all 6 slots in `0x00803698` (Left Mirror, Right Mirror, Exhaust, Trunk, Left Door, Right Door).
+- [x] **PS2 Demo Cross-Reference & Gutted PC Engine Discovery**:
+  - PS2 Demo evaluated `CarPartDamage::UpdateDamage` (`0x2d4928`) to dispatch animation channels (`0x2d`..`0x31` / `0x4461a0`) with animation IDs 30..34 (`0x445320`).
+  - Retail PC gutted this dispatch at `0x00610CD0` into an empty loop, leaving table `0x00803944` orphaned.
+  - Retail PC replaced `GetDamagedPartRenderingMatrix` in `CarRenderInfo::Render` (`0x00624441`) with `jmp 0x0062449E`, causing any part with damage $\ge 0.25\text{f}$ to bypass `eMesh::Render` and leak 64 bytes (`malloc(0x40)`).
+- [x] **Pivot-Invariant Physical Wobble Engine**:
+  - Implemented `BuildPivotWobbleMatrix` using exact 3D invariant pivot mathematics:
+    $$T_{offset} = P - P \cdot R$$
+    ensuring that part hinges and mounts ($P$) remain 100% attached to the car frame with 0.0 error while the unlatched ends flutter and rattle:
+    - **Left Door (Part 4)**: Hinge pinned at A-pillar $(0.68, 0.82, 0.22)$; rear latch rattles open outward on yaw axis ($Z$).
+    - **Right Door (Part 5)**: Hinge pinned at passenger A-pillar $(0.68, -0.82, 0.22)$; rattles open outward.
+    - **Trunk Lid (Part 3)**: Top hinge pinned near rear window $(-0.75, 0.00, 0.58)$; rear edge bounces upward on pitch ($Y$).
+    - **Exhaust Pipe (Part 2)**: Pipe pinned at underbody hanger $(-1.65, -0.38, 0.08)$; tip rattles and vibrates.
+    - **Left & Right Mirrors (Parts 0 & 1)**: Base pinned at window triangle $(0.50, \pm 0.88, 0.55)$; housing buzzes and jiggles.
+- [x] **Safe Mesh Rendering Without Register Corruption**:
+  - Intercepted `0x00624441` with `PartDamageWobbleCodeCave`:
+    - Evaluates detachment: jumps to `0x0062449E` when $\text{dmg} \ge 4.0\text{f}$ (detaches cleanly without memory leaks).
+    - Preserves register `ebx` completely, preventing any distortion or matrix corruption of the car body, wheels, or other parts.
+  - Hooked part mesh rendering at `0x00624499` with `Hooked_BreakablePartMeshRender`:
+    - Applies `s_ActivePartWobbleMatrix` only to the active breakable part model draw and resets it immediately.
+  - Hooked Left Mirror (`0x006264F6` threshold, `0x006269F0` render call via `Hooked_RenderLeftMirrorMesh`).
+  - Hooked Right Mirror (`0x00626A67` threshold, `0x00626FED` render call via `Hooked_RenderRightMirrorMesh`).
+- [x] **Collision Force Delivery & Quad Mapping**:
+  - Hooked `CarCollisionBody::AddDamageForce` (`0x00593C44`) with responsive force scaling and local impact quadrant mapping (Front, Rear, Left, Right).
+  - Populated zeroed collision weights table `0x008A0388`, ensuring crashes anywhere on the car deliver damage.
+- [x] **In-Game Testing Hotkey (F7)**:
+  - Pressing **F7** cycles player damage stages directly: `0.0f` (Repaired) -> `0.6f` (Stage 1) -> `1.5f` (Stage 2) -> `2.8f` (Stage 3) -> `4.5f` (Detached).
 
 ---
 
@@ -84,3 +136,4 @@ Only project source, scripts, environment, and documentation are tracked by Git:
    - Investigate split-screen 2P HUD remnants (`2PHudBot.fng`, `2PHudTop.fng`) identified in PS2 Alpha 10.
 3. **Cut Audio & Radio Chatter**:
    - Explore unused voice lines and SMS message triggers in GameCube/PS2 builds.
+
