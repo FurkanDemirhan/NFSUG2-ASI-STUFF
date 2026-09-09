@@ -42,8 +42,10 @@ namespace VehicleHealthManager
     bool IsCarDead(void* car);
     bool GetVehicleHealth(uintptr_t car, VehicleHealthData* outData);
     uintptr_t GetPlayerCar();
+    bool IsCarActive(uintptr_t car);
     std::vector<VehicleRenderEntry> GetActiveVehiclesForRender();
     void DamagePlayerCar(float amount);
     void DisqualifyCarInRace(uintptr_t car);
     bool IsInFreeRoam();
 }
+

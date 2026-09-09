@@ -76,13 +76,46 @@ namespace HealthBarRenderer
         void* pView = s_GetView ? s_GetView(1) : (void*)0x00832E50;
         if (!pView || !*(uintptr_t*)pView)
         {
-            static bool s_LoggedNoView = false;
-            if (!s_LoggedNoView)
-            {
-                s_LoggedNoView = true;
-                VehicleHealthLogger::Log("[Project Error] pView or *(uintptr_t*)pView is null! (pView=%p)", pView);
-            }
             return false;
+        }
+
+        // 1. Mandatory camera forward check:
+        // Any object BEHIND the camera (camSpaceZ <= 0.5m) MUST be immediately discarded.
+        // In perspective projection, dividing by negative W reflects objects behind the camera into the forward frustum.
+        uintptr_t camera = *(uintptr_t*)((uintptr_t)pView + 0x40);
+        if (camera && camera >= 0x00010000)
+        {
+            float camX = *(float*)(camera + 0x40);
+            float camY = *(float*)(camera + 0x44);
+            float camZ = *(float*)(camera + 0x48);
+
+            float fX = *(float*)(camera + 0x08);
+            float fY = *(float*)(camera + 0x18);
+            float fZ = *(float*)(camera + 0x28);
+
+            float dx = worldPos.x - camX;
+            float dy = worldPos.y - camY;
+            float dz = worldPos.z - camZ;
+
+            float camSpaceZ = dx * fX + dy * fY + dz * fZ;
+            if (camSpaceZ <= 0.5f)
+            {
+                // Car is behind the camera or too close to lens
+                return false;
+            }
+        }
+
+        // 2. Mandatory W_clip check from View 1's projection matrix
+        uintptr_t viewObj = *(uintptr_t*)pView;
+        if (viewObj && viewObj >= 0x00010000)
+        {
+            float* m = (float*)(viewObj + 0x80);
+            float wClip = worldPos.x * m[3] + worldPos.y * m[7] + worldPos.z * m[11] + m[15];
+            if (wClip <= 0.5f)
+            {
+                // Behind the near projection plane
+                return false;
+            }
         }
 
         int screenW = *(int*)0x00870980;
@@ -90,19 +123,9 @@ namespace HealthBarRenderer
         if (screenW <= 0) screenW = (vp.Width > 0) ? (int)vp.Width : 640;
         if (screenH <= 0) screenH = (vp.Height > 0) ? (int)vp.Height : 480;
 
-        // 1. Primary projection: eView::WorldToScreen (0x005BC4A0) on View 1
+        // 3. Primary projection: eView::WorldToScreen (0x005BC4A0) on View 1
         bVector3 screenPos = { 0.0f, 0.0f, 0.0f };
         s_ViewWorldToScreen(pView, &screenPos, &worldPos);
-
-        // Debug logging for first 30 projection attempts
-        static int s_DebugProjCount = 0;
-        if (s_DebugProjCount < 30)
-        {
-            s_DebugProjCount++;
-            VehicleHealthLogger::Log("[Proj #%d] World(%.1f, %.1f, %.1f) -> Screen(%.1f, %.1f, Zndc=%.4f) Res(%d x %d) VP(%u x %u)",
-                                     s_DebugProjCount, worldPos.x, worldPos.y, worldPos.z,
-                                     screenPos.x, screenPos.y, screenPos.z, screenW, screenH, vp.Width, vp.Height);
-        }
 
         // Direct3D Zndc clipping: points in front of camera are in (0.0f, 1.0f]
         if (screenPos.z > 0.0f && screenPos.z <= 1.05f)
@@ -111,7 +134,7 @@ namespace HealthBarRenderer
             outScreenY = screenPos.y * ((float)vp.Height / (float)screenH);
             outNdcZ    = screenPos.z;
 
-            // Frustum culling check with safety margin
+            // Frustum culling check with safety margin for bar dimensions
             if (outScreenX >= -150.0f && outScreenX <= (float)vp.Width + 150.0f &&
                 outScreenY >= -150.0f && outScreenY <= (float)vp.Height + 150.0f)
             {
@@ -119,9 +142,8 @@ namespace HealthBarRenderer
             }
         }
 
-        // 2. Camera matrix projection fallback (using Camera struct at pView + 0x40, identical to CarRenderInfo::Neon)
-        uintptr_t camera = *(uintptr_t*)((uintptr_t)pView + 0x40);
-        if (camera && camera > 0x00400000)
+        // 4. Camera matrix projection fallback
+        if (camera && camera >= 0x00010000)
         {
             float camX = *(float*)(camera + 0x40);
             float camY = *(float*)(camera + 0x44);
@@ -292,6 +314,9 @@ namespace HealthBarRenderer
             }
 
             // For all OTHER vehicles (AI opponents & traffic):
+            if (!entry.carPtr || !VehicleHealthManager::IsCarActive(entry.carPtr))
+                continue;
+
             // Project their 3D world position to floating coordinates above each car
             float screenX = 0.0f, screenY = 0.0f, ndcZ = 0.0f;
             bool projected = ProjectWorldToScreen(entry.worldRoofPos, vp, screenX, screenY, ndcZ);

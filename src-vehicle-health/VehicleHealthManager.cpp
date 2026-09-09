@@ -58,23 +58,6 @@ namespace VehicleHealthManager
         s_HealthMap.clear();
     }
 
-    static bool IsValidCar(uintptr_t car)
-    {
-        if (!car || car < 0x00400000 || car > 0x7FFFFFFF) return false;
-        uintptr_t world = *(uintptr_t*)0x00890080;
-        if (!world || world < 0x00400000 || world > 0x7FFFFFFF) return false;
-
-        int totalCars = *(int*)(world + 0x10);
-        if (totalCars <= 0 || totalCars > 64) return false;
-
-        for (int i = 0; i < totalCars; ++i)
-        {
-            uintptr_t c = *(uintptr_t*)(world + 0x1C + i * 4);
-            if (c == car) return true;
-        }
-        return false;
-    }
-
     uintptr_t GetPlayerCar()
     {
         uintptr_t world = *(uintptr_t*)0x00890080;
@@ -110,6 +93,61 @@ namespace VehicleHealthManager
 
         return 0;
     }
+
+    bool IsCarActive(uintptr_t car)
+    {
+        if (!car || car < 0x00400000 || car > 0x7FFFFFFF)
+            return false;
+
+        // The local player car is always active
+        if (car == GetPlayerCar())
+            return true;
+
+        // 1. Check active flag at Car + 0x550 (mIsActive in SPEED2.EXE)
+        // In SPEED2.EXE, 1 = active / spawned in world, 0 = inactive / despawned / pooled
+        uint8_t isActive = *(uint8_t*)(car + 0x550);
+        if (isActive == 0)
+            return false;
+
+        // 2. Check Z coordinate (Car + 0x68)
+        // Despawned/unspawned vehicles are parked off-world at Z = -123456.0f (0x8025b8 in SPEED2.EXE)
+        float cz = *(float*)(car + 0x68);
+        if (std::isnan(cz) || std::isinf(cz) || std::fabs(cz - (-123456.0f)) < 1.0f || std::fabs(cz) > 50000.0f)
+            return false;
+
+        // 3. For traffic cars, check TrafficAI at Car + 0x2C if present
+        // In SPEED2.EXE at 0x4099d9, trafficAI + 0x77D is 1 when deactivated/sleeping/despawned
+        uintptr_t trafficAI = *(uintptr_t*)(car + 0x2C);
+        if (trafficAI && trafficAI >= 0x00400000 && trafficAI < 0x7FFFFFFF)
+        {
+            uint8_t inactiveFlag = *(uint8_t*)(trafficAI + 0x77D);
+            if (inactiveFlag != 0)
+                return false;
+        }
+
+        return true;
+    }
+
+    static bool IsValidCar(uintptr_t car)
+    {
+        if (!car || car < 0x00400000 || car > 0x7FFFFFFF) return false;
+        uintptr_t world = *(uintptr_t*)0x00890080;
+        if (!world || world < 0x00400000 || world > 0x7FFFFFFF) return false;
+
+        int totalCars = *(int*)(world + 0x10);
+        if (totalCars <= 0 || totalCars > 64) return false;
+
+        for (int i = 0; i < totalCars; ++i)
+        {
+            uintptr_t c = *(uintptr_t*)(world + 0x1C + i * 4);
+            if (c == car)
+            {
+                return IsCarActive(car);
+            }
+        }
+        return false;
+    }
+
 
     void DisqualifyCarInRace(uintptr_t car)
     {
@@ -434,6 +472,16 @@ namespace VehicleHealthManager
             uintptr_t car = *(uintptr_t*)(world + 0x1C + i * 4);
             if (!car || car < 0x00400000 || car > 0x7FFFFFFF) continue;
 
+            // Immediately skip and purge inactive / despawned / pooled vehicles
+            if (!IsCarActive(car))
+            {
+                if (car != playerCar)
+                {
+                    s_HealthMap.erase(car);
+                }
+                continue;
+            }
+
             auto it = s_HealthMap.find(car);
             if (it == s_HealthMap.end())
             {
@@ -531,10 +579,22 @@ namespace VehicleHealthManager
         int totalCars = *(int*)(world + 0x10);
         if (totalCars <= 0 || totalCars > 64) return;
 
+        uintptr_t playerCar = GetPlayerCar();
+
         for (int i = 0; i < totalCars; ++i)
         {
             uintptr_t car = *(uintptr_t*)(world + 0x1C + i * 4);
             if (!car || car < 0x00400000 || car > 0x7FFFFFFF) continue;
+
+            // Immediately purge any vehicle that despawned
+            if (!IsCarActive(car))
+            {
+                if (car != playerCar)
+                {
+                    s_HealthMap.erase(car);
+                }
+                continue;
+            }
 
             auto it = s_HealthMap.find(car);
             if (it != s_HealthMap.end())
@@ -577,12 +637,12 @@ namespace VehicleHealthManager
 
         // Periodically purge despawned vehicles (e.g. ambient traffic in Free Roam) to prevent memory growth
         static int s_PurgeCounter = 0;
-        if (++s_PurgeCounter >= 60)
+        if (++s_PurgeCounter >= 30)
         {
             s_PurgeCounter = 0;
             for (auto mapIt = s_HealthMap.begin(); mapIt != s_HealthMap.end(); )
             {
-                if (!mapIt->second.isPlayer && !IsValidCar(mapIt->first))
+                if (!mapIt->second.isPlayer && (!IsValidCar(mapIt->first) || !IsCarActive(mapIt->first)))
                 {
                     mapIt = s_HealthMap.erase(mapIt);
                 }
