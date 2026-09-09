@@ -1,6 +1,9 @@
+> (dev here: i am not pro ai nor anti ai, i just managed things and guided ai to what to do and what to use, ai couldnt have done this if i didnt have proper knowlage, thats it)
+
 # NFSUG2-ASI-STUFF
 
 > **Custom ASI Plugins, Reverse-Engineered Restorations & Mechanics for Need for Speed: Underground 2 (PC v1.2 NTSC)**
+
 
 ---
 
@@ -9,6 +12,7 @@
 > **This entire repository is 100% vibecoded!**
 > 
 > Everything in here—from reverse-engineering memory structures to assembly caves, physics impulse hooking, Direct3D 9 matrix math, and trick judging routines—was developed, tested, and iterated through **AI pair programming, vibes, and raw intuition**. Expect bizarre hacks, deep engine hooks, unconventional solutions, and undocumented EA Black Box quirks. It runs, it does wild things, but it was forged entirely in the fires of vibe coding. **Use at your own risk!**
+
 
 ---
 
