@@ -357,14 +357,7 @@ namespace VehicleHealthManager
 
             if (g_HealthConfig.disableVehicleOnDeath)
             {
-                uintptr_t driver = *(uintptr_t*)(car + 0x30);
-                if (driver)
-                {
-                    *(float*)(driver + 0x20C) = 0.0f; // Forward throttle
-                    *(float*)(driver + 0x210) = 0.0f; // Reverse throttle / Brake
-                    *(float*)(driver + 0x214) = 0.0f; // Handbrake
-                }
-                *(int*)(car + 0x4D0) = 0; // Neutral gear
+                ImmobilizeCar((uintptr_t)car);
             }
 
             // Disqualify car in race status if enabled (applies to AI and Player)
@@ -384,6 +377,108 @@ namespace VehicleHealthManager
             return it->second.isDead;
         }
         return false;
+    }
+
+    void ImmobilizeCar(uintptr_t car)
+    {
+        if (!car || car < 0x00400000 || car > 0x7FFFFFFF) return;
+
+        // 1. Enforce driver inputs: Center steering, zero throttle, 100% foot brake, 100% locked handbrake
+        uintptr_t driver = *(uintptr_t*)(car + 0x30);
+        if (driver && driver >= 0x00400000 && driver < 0x7FFFFFFF)
+        {
+            *(float*)(driver + 0x208) = 0.0f; // Center steering
+            *(float*)(driver + 0x20C) = 0.0f; // Forward throttle = 0
+            *(float*)(driver + 0x210) = 1.0f; // Foot brake = 100% full brake!
+            *(float*)(driver + 0x214) = 1.0f; // Handbrake = 100% full lock!
+        }
+        *(int*)(car + 0x4D0) = 0; // Force gear = Neutral on Car
+
+        // 2. PhysicsMover drivetrain: Force neutral transmission gear, zero engine throttle, lock wheels
+        uintptr_t mover = *(uintptr_t*)(car + 0x2C);
+        if (mover && mover >= 0x00400000 && mover < 0x7FFFFFFF)
+        {
+            uintptr_t trans = *(uintptr_t*)(mover + 0x4C);
+            if (trans && trans >= 0x00400000 && trans < 0x7FFFFFFF)
+            {
+                *(int*)(trans + 0x50) = 0;
+                *(int*)(trans + 0x54) = 0; // Force neutral gear in transmission
+            }
+
+            uintptr_t engine = *(uintptr_t*)(mover + 0x48);
+            if (engine && engine >= 0x00400000 && engine < 0x7FFFFFFF)
+            {
+                *(float*)(engine + 0x78) = 0.0f; // Force engine throttle = 0
+            }
+
+            // Lock all 4 wheels from spinning
+            for (int w = 0; w < 4; ++w)
+            {
+                uintptr_t wheel = *(uintptr_t*)(mover + 0x38 + w * 4);
+                if (wheel && wheel >= 0x00400000 && wheel < 0x7FFFFFFF)
+                {
+                    *(float*)(wheel + 0x28) = 0.0f; // Wheel angular velocity = 0
+                }
+            }
+        }
+
+        // 3. Physical velocity and momentum arrest on RigidBody
+        uintptr_t rigidBody = 0;
+        if (mover && mover >= 0x00400000 && mover < 0x7FFFFFFF)
+        {
+            rigidBody = *(uintptr_t*)(mover + 0x20);
+        }
+        if (!rigidBody || rigidBody < 0x00400000 || rigidBody > 0x7FFFFFFF)
+        {
+            uintptr_t simVehicle = *(uintptr_t*)(car + 0x1C);
+            if (simVehicle && simVehicle >= 0x00400000 && simVehicle < 0x7FFFFFFF)
+            {
+                rigidBody = *(uintptr_t*)(simVehicle + 0x2C);
+            }
+        }
+
+        if (rigidBody && rigidBody >= 0x00400000 && rigidBody < 0x7FFFFFFF)
+        {
+            float* vx = (float*)(rigidBody + 0x70);
+            float* vy = (float*)(rigidBody + 0x74);
+            float* vz = (float*)(rigidBody + 0x78);
+            float speedSq = (*vx) * (*vx) + (*vy) * (*vy) + (*vz) * (*vz);
+
+            // If speed is low (< 3.0 m/s or ~11 km/h), completely arrest all motion to eliminate slow creep/rolling
+            if (speedSq < 9.0f)
+            {
+                *vx = 0.0f;
+                *vy = 0.0f;
+                *vz = 0.0f;
+                *(float*)(rigidBody + 0x24) = 0.0f;
+                *(float*)(rigidBody + 0x28) = 0.0f;
+                *(float*)(rigidBody + 0x80) = 0.0f;
+                *(float*)(rigidBody + 0x84) = 0.0f;
+                *(float*)(rigidBody + 0x88) = 0.0f;
+                *(float*)(rigidBody + 0xA0) = 0.0f;
+                *(float*)(rigidBody + 0xA4) = 0.0f;
+                *(float*)(rigidBody + 0xA8) = 0.0f;
+                *(float*)(rigidBody + 0xB0) = 0.0f;
+                *(float*)(rigidBody + 0xB4) = 0.0f;
+                *(float*)(rigidBody + 0xB8) = 0.0f;
+            }
+            else
+            {
+                // High-speed crash braking deceleration (rapidly drops speed to 0 within fractions of a second)
+                *vx *= 0.80f;
+                *vy *= 0.80f;
+                *vz *= 0.80f;
+                *(float*)(rigidBody + 0xA0) *= 0.80f;
+                *(float*)(rigidBody + 0xA4) *= 0.80f;
+                *(float*)(rigidBody + 0xA8) *= 0.80f;
+                *(float*)(rigidBody + 0x80) *= 0.80f;
+                *(float*)(rigidBody + 0x84) *= 0.80f;
+                *(float*)(rigidBody + 0x88) *= 0.80f;
+                *(float*)(rigidBody + 0xB0) *= 0.80f;
+                *(float*)(rigidBody + 0xB4) *= 0.80f;
+                *(float*)(rigidBody + 0xB8) *= 0.80f;
+            }
+        }
     }
 
     bool GetVehicleHealth(uintptr_t car, VehicleHealthData* outData)
@@ -439,14 +534,10 @@ namespace VehicleHealthManager
             it->second.isDead = true;
             VehicleHealthLogger::Log("[!] Player car DESTROYED (0 HP)! Engine / drivetrain disabled.");
 
-            uintptr_t driver = *(uintptr_t*)(playerCar + 0x30);
-            if (driver)
+            if (g_HealthConfig.disableVehicleOnDeath)
             {
-                *(float*)(driver + 0x20C) = 0.0f; // Forward throttle
-                *(float*)(driver + 0x210) = 0.0f; // Reverse throttle / Brake
-                *(float*)(driver + 0x214) = 0.0f; // Handbrake
+                ImmobilizeCar(playerCar);
             }
-            *(int*)(playerCar + 0x4D0) = 0; // Neutral gear
 
             if (g_HealthConfig.disqualifyOnDeath)
             {
@@ -620,17 +711,10 @@ namespace VehicleHealthManager
                     it->second.lagHealth = it->second.currentHealth;
                 }
 
-                // If dead, continuously enforce zero throttle, zero reverse, and Neutral gear
+                // If dead, continuously enforce zero throttle, 100% full brakes, Neutral gear, and velocity arrest
                 if (it->second.isDead && g_HealthConfig.disableVehicleOnDeath)
                 {
-                    uintptr_t driver = *(uintptr_t*)(car + 0x30);
-                    if (driver && driver >= 0x00400000 && driver < 0x7FFFFFFF)
-                    {
-                        *(float*)(driver + 0x20C) = 0.0f; // Forward throttle = 0
-                        *(float*)(driver + 0x210) = 0.0f; // Reverse throttle / Brake = 0
-                        *(float*)(driver + 0x214) = 0.0f; // Handbrake = 0
-                    }
-                    *(int*)(car + 0x4D0) = 0; // Neutral gear
+                    ImmobilizeCar(car);
                 }
             }
         }
@@ -690,16 +774,15 @@ namespace VehicleHealthManager
         uintptr_t car = *(uintptr_t*)((uintptr_t)mover + 0x5C);
         if (!car || car < 0x00400000 || car > 0x7FFFFFFF) return;
 
-        if (IsCarDead((void*)car))
+        // Ensure car's PhysicsMover pointer at Car + 0x2C is linked
+        if (*(uintptr_t*)(car + 0x2C) != (uintptr_t)mover)
         {
-            uintptr_t driver = *(uintptr_t*)((uintptr_t)mover + 4);
-            if (driver && driver >= 0x00400000 && driver < 0x7FFFFFFF)
-            {
-                *(float*)(driver + 0x20C) = 0.0f;   // Force forward throttle = 0.0f
-                *(float*)(driver + 0x210) = 0.0f;   // Force reverse throttle / brake = 0.0f
-                *(float*)(driver + 0x214) = 0.0f;   // Force handbrake = 0.0f
-            }
-            *(int*)(car + 0x4D0) = 0;               // Force gear = Neutral
+            *(uintptr_t*)(car + 0x2C) = (uintptr_t)mover;
+        }
+
+        if (IsCarDead((void*)car) && g_HealthConfig.disableVehicleOnDeath)
+        {
+            ImmobilizeCar(car);
         }
     }
 

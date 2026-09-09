@@ -46,6 +46,7 @@ namespace VehicleHealthManager
     std::vector<VehicleRenderEntry> GetActiveVehiclesForRender();
     void DamagePlayerCar(float amount);
     void DisqualifyCarInRace(uintptr_t car);
+    void ImmobilizeCar(uintptr_t car);
     bool IsInFreeRoam();
 }
 
