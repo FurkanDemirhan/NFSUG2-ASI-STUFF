@@ -1,9 +1,9 @@
-# Need For Speed Underground 2 - Code Restoration Project
+# NFSUG2-ASI-STUFF - Need For Speed Underground 2 ASI Plugins & Restorations
 
 ## 1. Overview & Objective
-This project reverse-engineers and restores cut and unused code, gameplay mechanics, debugging features, and assets in the PC release of **Need For Speed: Underground 2 (v1.2 US / NTSC)**. 
+This repository (**NFSUG2-ASI-STUFF**) contains custom ASI plugins, reverse-engineered restorations, cut gameplay mechanics, and new features for the PC release of **Need For Speed: Underground 2 (v1.2 US / NTSC)**. 
 
-To achieve high-accuracy restorations, we cross-reference the PC executable with development and early builds:
+To achieve high-accuracy restorations and feature ports, we cross-reference the PC executable with development and early builds:
 - **PS2 Alpha 10 Build** (`SLUS_210.65__(Alpha10R_Bin).ELF` / `./GAME/PS2/Alpha10/`)
 - **PS2 Demo Build** (`SLUS_291.18_(PS2DEMO).ELF` / `./GAME/PS2/Demo/`)
 - **GameCube NTSC Build** (IDA 9.0 DB: `NFSUnderground2-Gamecube-NTSC.i64` — 14,598 named functions)
@@ -20,8 +20,8 @@ To achieve high-accuracy restorations, we cross-reference the PC executable with
   - Python: `python3` with `pyelftools`, `pefile`, `capstone`.
   - Local Python venv (`.venv`): `python-idb` and `capstone` for reading IDA Pro 9.0 `.i64` databases and disassembling.
 - **Target Architecture**: 32-bit x86 Windows Dynamic Link Libraries (`.asi`).
-- **Hooking Framework**: Header-only `injector` library under `src/includes/injector/`.
-- **Configuration**: INI file parser under `src/includes/IniReader.h`.
+- **Hooking Framework**: Header-only `injector` library under `includes/injector/`.
+- **Configuration**: INI file parser under `includes/IniReader.h`.
 - **Plugin Deployments**:
   - `GAME/PC/scripts/NFSU2CodeRestoration.asi` & `NFSU2CodeRestoration.ini`
   - `GAME/PC/scripts/NFSU2VehicleHealth.asi` & `NFSU2VehicleHealth.ini`
@@ -31,19 +31,20 @@ To achieve high-accuracy restorations, we cross-reference the PC executable with
 
 ## 3. Directory Layout & Git Policy
 Only project source, scripts, environment, and documentation are tracked by Git:
-- `src/` — C++ source code for the restoration plugin (`NFSU2CodeRestoration.asi`):
-  - [`src/dllmain.cpp`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src/dllmain.cpp): Compatibility check against v1.2 NTSC entry point (`0x75BCC7`), orchestrates restorations.
-  - [`src/Config.h`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src/Config.h) / [`src/Config.cpp`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src/Config.cpp): Reads and validates `NFSU2CodeRestoration.ini` settings and hotkeys.
-  - [`src/Logger.h`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src/Logger.h) / [`src/Logger.cpp`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src/Logger.cpp): Runtime logging to `NFSU2CodeRestoration.log` with crash handler.
-  - [`src/restorations/DebugCarCustomize.cpp`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src/restorations/DebugCarCustomize.cpp): Restores cut `UI_DebugCarCustomize.fng` into car customize menu.
-  - [`src/restorations/CameraRestorations.cpp`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src/restorations/CameraRestorations.cpp): Restores all 5 camera POV modes (Driver, Bumper, Hood, Drift, Chase).
-  - [`src/restorations/RaceModeRestorations.cpp`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src/restorations/RaceModeRestorations.cpp): Restores Outrun in Quick Race, Free Run/Outrun track select, AI opponents in Sprint Drift, URL lap count modifier, Pause Menu "Restart Race", Track 4000 barrier crash fix, Career locked area barrier removal, Any Track in Any Mode hook, and Lap Knockout / GT mode in Quick Race.
-  - [`src/restorations/BurnoutRestorations.cpp`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src/restorations/BurnoutRestorations.cpp) / [`src/restorations/BurnoutRestorations.h`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src/restorations/BurnoutRestorations.h): Restores Burnout / Smokeshow mode, trick judging engine, combo multipliers, and on-screen HUD popups (`SplitTimeText` / `RaceOverMessage`).
-  - [`src/restorations/FngData_HUD_CarShow.cpp`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src/restorations/FngData_HUD_CarShow.cpp): Restored and fixed binary package data for `HUD_CarShow.fng` (backing plates, minimap tracking, tachometer cleanups).
-  - [`src/restorations/VehicleDamageRestorations.cpp`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src/restorations/VehicleDamageRestorations.cpp) / [`src/restorations/VehicleDamageRestorations.h`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src/restorations/VehicleDamageRestorations.h): Restores cut vehicle part damage, 3-stage wobbling animations (`WINDOW_DAMAGE0..2`), dynamic flapping hinges (doors/trunk), collision impulse delivery, and severe crash detachment (`4.0f` threshold).
-  - [`src/restorations/CustomizationRestorations.cpp`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src/restorations/CustomizationRestorations.cpp): Restores hidden Special Vinyls category (`0x1C`).
-  - [`src/restorations/EngineFixes.cpp`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src/restorations/EngineFixes.cpp) / [`src/restorations/EngineFixes.h`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src/restorations/EngineFixes.h): Disappearing wheels fix in `CarPartCuller`, internal `DebugWorldCameraMover`, and `PATH_status` audio bank null crash fix (`0x0073927D`).
-  - [`src/restorations/GameplayRestorations.cpp`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src/restorations/GameplayRestorations.cpp): Main loop tick at `0x581470`, F6 Autopilot (`Player_AutoPilotOn/Off`), F5 Unlock All, F7 Cycle Damage Stages.
+- `includes/` — Shared hooking (`injector`) and configuration (`IniReader.h`) headers.
+- `src-CodeRestoreTest/` — C++ source code for the restoration plugin (`NFSU2CodeRestoration.asi`):
+  - [`src-CodeRestoreTest/dllmain.cpp`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src-CodeRestoreTest/dllmain.cpp): Compatibility check against v1.2 NTSC entry point (`0x75BCC7`), orchestrates restorations.
+  - [`src-CodeRestoreTest/Config.h`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src-CodeRestoreTest/Config.h) / [`src-CodeRestoreTest/Config.cpp`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src-CodeRestoreTest/Config.cpp): Reads and validates `NFSU2CodeRestoration.ini` settings and hotkeys.
+  - [`src-CodeRestoreTest/Logger.h`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src-CodeRestoreTest/Logger.h) / [`src-CodeRestoreTest/Logger.cpp`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src-CodeRestoreTest/Logger.cpp): Runtime logging to `NFSU2CodeRestoration.log` with crash handler.
+  - [`src-CodeRestoreTest/restorations/DebugCarCustomize.cpp`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src-CodeRestoreTest/restorations/DebugCarCustomize.cpp): Restores cut `UI_DebugCarCustomize.fng` into car customize menu.
+  - [`src-CodeRestoreTest/restorations/CameraRestorations.cpp`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src-CodeRestoreTest/restorations/CameraRestorations.cpp): Restores all 5 camera POV modes (Driver, Bumper, Hood, Drift, Chase).
+  - [`src-CodeRestoreTest/restorations/RaceModeRestorations.cpp`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src-CodeRestoreTest/restorations/RaceModeRestorations.cpp): Restores Outrun in Quick Race, Free Run/Outrun track select, AI opponents in Sprint Drift, URL lap count modifier, Pause Menu "Restart Race", Track 4000 barrier crash fix, Career locked area barrier removal, Any Track in Any Mode hook, and Lap Knockout / GT mode in Quick Race.
+  - [`src-CodeRestoreTest/restorations/BurnoutRestorations.cpp`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src-CodeRestoreTest/restorations/BurnoutRestorations.cpp) / [`src-CodeRestoreTest/restorations/BurnoutRestorations.h`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src-CodeRestoreTest/restorations/BurnoutRestorations.h): Restores Burnout / Smokeshow mode, trick judging engine, combo multipliers, and on-screen HUD popups (`SplitTimeText` / `RaceOverMessage`).
+  - [`src-CodeRestoreTest/restorations/FngData_HUD_CarShow.cpp`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src-CodeRestoreTest/restorations/FngData_HUD_CarShow.cpp): Restored and fixed binary package data for `HUD_CarShow.fng` (backing plates, minimap tracking, tachometer cleanups).
+  - [`src-CodeRestoreTest/restorations/VehicleDamageRestorations.cpp`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src-CodeRestoreTest/restorations/VehicleDamageRestorations.cpp) / [`src-CodeRestoreTest/restorations/VehicleDamageRestorations.h`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src-CodeRestoreTest/restorations/VehicleDamageRestorations.h): Restores cut vehicle part damage, 3-stage wobbling animations (`WINDOW_DAMAGE0..2`), dynamic flapping hinges (doors/trunk), collision impulse delivery, and severe crash detachment (`4.0f` threshold).
+  - [`src-CodeRestoreTest/restorations/CustomizationRestorations.cpp`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src-CodeRestoreTest/restorations/CustomizationRestorations.cpp): Restores hidden Special Vinyls category (`0x1C`).
+  - [`src-CodeRestoreTest/restorations/EngineFixes.cpp`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src-CodeRestoreTest/restorations/EngineFixes.cpp) / [`src-CodeRestoreTest/restorations/EngineFixes.h`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src-CodeRestoreTest/restorations/EngineFixes.h): Disappearing wheels fix in `CarPartCuller`, internal `DebugWorldCameraMover`, and `PATH_status` audio bank null crash fix (`0x0073927D`).
+  - [`src-CodeRestoreTest/restorations/GameplayRestorations.cpp`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src-CodeRestoreTest/restorations/GameplayRestorations.cpp): Main loop tick at `0x581470`, F6 Autopilot (`Player_AutoPilotOn/Off`), F5 Unlock All, F7 Cycle Damage Stages.
 - `src-vehicle-health/` — C++ source code for the vehicle health and disqualification plugin (`NFSU2VehicleHealth.asi`):
   - [`src-vehicle-health/dllmain.cpp`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src-vehicle-health/dllmain.cpp): ASI entry point, game version verification, lifecycle hook installation.
   - [`src-vehicle-health/Config.h`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src-vehicle-health/Config.h) / [`src-vehicle-health/Config.cpp`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src-vehicle-health/Config.cpp): Reads and validates `NFSU2VehicleHealth.ini` settings (HP values, damage scaling, HUD/floating toggles, hotkeys).
@@ -55,9 +56,10 @@ Only project source, scripts, environment, and documentation are tracked by Git:
   - `scripts/extract_ps2_symbols.py`: Extracts vtables, source paths, assertions, and strings from PS2 ELFs.
   - `scripts/query_symbols.py`: Instant CLI search across PC, GameCube, and PS2 symbol caches.
 - `shell.nix` — Reproducible Nix environment specification.
-- `Makefile` — Statically links runtime libraries (`-static`) and builds both `NFSU2CodeRestoration.asi` and `NFSU2VehicleHealth.asi`, deploying to `GAME/PC/scripts/`.
+- `Makefile` — Statically links runtime libraries (`-static`), builds both `NFSU2CodeRestoration.asi` and `NFSU2VehicleHealth.asi` together or separately, and deploys to `GAME/PC/scripts/`.
+- [`README.md`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/README.md) — Public repository documentation, build instructions, and credits.
 - [`HANDOFF.md`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/HANDOFF.md) — Project roadmap, architecture notes, and progress handoff.
-- [Walkthrough](file:///home/nebulafdv2/.gemini/antigravity-ide/brain/a7050381-50e9-484a-9e54-26ba7f42b0e0/walkthrough.md) — Detailed step-by-step documentation of all implemented features, bugfixes, and reverse-engineering findings.
+- [Walkthrough](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/WALKTHROUGH.md) — Detailed step-by-step documentation of all implemented features, bugfixes, and reverse-engineering findings.
 - `.gitignore` — Strictly ignores `GAME/`, `Bin-idb-i64/`, `Reference-Code/`, `build/`, `.venv/`, and `cache/`.
 
 ---
