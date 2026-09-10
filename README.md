@@ -1,4 +1,4 @@
-> (dev here: i am not pro ai nor anti ai, i just managed things and guided ai to what to do and what to use, ai couldnt have done this if i didnt have proper knowlage, thats it)
+> (dev here: i am not pro ai nor anti ai, i just managed things and guided ai to what to do and what to use, ai couldnt have done this if i didnt have proper knowledge, thats it)
 
 # NFSUG2-ASI-STUFF
 
