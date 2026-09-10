@@ -115,12 +115,12 @@ namespace VehicleHealthManager
         if (std::isnan(cz) || std::isinf(cz) || std::fabs(cz - (-123456.0f)) < 1.0f || std::fabs(cz) > 50000.0f)
             return false;
 
-        // 3. For traffic cars, check TrafficAI at Car + 0x2C if present
-        // In SPEED2.EXE at 0x4099d9, trafficAI + 0x77D is 1 when deactivated/sleeping/despawned
-        uintptr_t trafficAI = *(uintptr_t*)(car + 0x2C);
-        if (trafficAI && trafficAI >= 0x00400000 && trafficAI < 0x7FFFFFFF)
+        // 3. For traffic cars, check RigidBody active flag at Car + 0x2C if present
+        // In SPEED2.EXE at 0x4099d9, rigidBody + 0x77D is 1 when deactivated/sleeping/despawned
+        uintptr_t rigidBody = *(uintptr_t*)(car + 0x2C);
+        if (rigidBody && rigidBody >= 0x00400000 && rigidBody < 0x7FFFFFFF)
         {
-            uint8_t inactiveFlag = *(uint8_t*)(trafficAI + 0x77D);
+            uint8_t inactiveFlag = *(uint8_t*)(rigidBody + 0x77D);
             if (inactiveFlag != 0)
                 return false;
         }
@@ -395,7 +395,8 @@ namespace VehicleHealthManager
         *(int*)(car + 0x4D0) = 0; // Force gear = Neutral on Car
 
         // 2. PhysicsMover drivetrain: Force neutral transmission gear, zero engine throttle, lock wheels
-        uintptr_t mover = *(uintptr_t*)(car + 0x2C);
+        // In Car, offset +0x34 is the active Mover (PhysicsMover)
+        uintptr_t mover = *(uintptr_t*)(car + 0x34);
         if (mover && mover >= 0x00400000 && mover < 0x7FFFFFFF)
         {
             uintptr_t trans = *(uintptr_t*)(mover + 0x4C);
@@ -422,18 +423,13 @@ namespace VehicleHealthManager
             }
         }
 
-        // 3. Physical velocity and momentum arrest on RigidBody
-        uintptr_t rigidBody = 0;
-        if (mover && mover >= 0x00400000 && mover < 0x7FFFFFFF)
-        {
-            rigidBody = *(uintptr_t*)(mover + 0x20);
-        }
+        // 3. Physical velocity and momentum arrest on RigidBody (Car + 0x2C)
+        uintptr_t rigidBody = *(uintptr_t*)(car + 0x2C);
         if (!rigidBody || rigidBody < 0x00400000 || rigidBody > 0x7FFFFFFF)
         {
-            uintptr_t simVehicle = *(uintptr_t*)(car + 0x1C);
-            if (simVehicle && simVehicle >= 0x00400000 && simVehicle < 0x7FFFFFFF)
+            if (mover && mover >= 0x00400000 && mover < 0x7FFFFFFF)
             {
-                rigidBody = *(uintptr_t*)(simVehicle + 0x2C);
+                rigidBody = *(uintptr_t*)(mover + 0x20);
             }
         }
 
@@ -773,12 +769,6 @@ namespace VehicleHealthManager
         if (!mover || (uintptr_t)mover < 0x00400000 || (uintptr_t)mover > 0x7FFFFFFF) return;
         uintptr_t car = *(uintptr_t*)((uintptr_t)mover + 0x5C);
         if (!car || car < 0x00400000 || car > 0x7FFFFFFF) return;
-
-        // Ensure car's PhysicsMover pointer at Car + 0x2C is linked
-        if (*(uintptr_t*)(car + 0x2C) != (uintptr_t)mover)
-        {
-            *(uintptr_t*)(car + 0x2C) = (uintptr_t)mover;
-        }
 
         if (IsCarDead((void*)car) && g_HealthConfig.disableVehicleOnDeath)
         {
