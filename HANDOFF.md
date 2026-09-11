@@ -163,7 +163,7 @@ Only project source, scripts, environment, and documentation are tracked by Git:
   - Hooked `StartCareerFreeRoam` (`0x005404A0`), `StartRace` (`0x0053FC20`), and checks Track `4000` (`0xFA0`) with `numRacers <= 1`.
   - In Quick Race Free Roam and Career Free Roam, the player car is completely immune to damage, health remains locked at 100%, and race disqualification is bypassed.
 - [x] **Active / Despawned / Pooled Traffic Car Lifecycle Tracking**:
-  - Validates `Car + 0x550` (`mIsActive == 1`), $Z \ne -123456.0\text{f}$, and `TrafficAI + 0x77D == 0`.
+  - Validates `Car + 0x550` (`mIsActive == 1`), $Z \ne -123456.0\text{f}$, and `RigidBody + 0x77D == 0` (`Car + 0x2C`).
   - Instantly removes despawned or pooled traffic cars from `s_HealthMap` and omits them from rendering, eliminating frozen health bars over empty road locations.
   - Periodic cleanup timer purges stale vehicle references every 30 frames.
 - [x] **Multi-Layer Complete Vehicle Death Immobilization (`ImmobilizeCar`)**:
@@ -171,6 +171,10 @@ Only project source, scripts, environment, and documentation are tracked by Git:
   - **Drivetrain Kill**: Sets throttle to 0 (`driver + 0x20C = 0.0f`), centers steering (`driver + 0x208 = 0.0f`), locks neutral gear on Car (`car + 0x4D0 = 0`), locks transmission neutral (`mover + 0x4C + 0x50/54 = 0`), zeroes engine throttle (`mover + 0x48 + 0x78 = 0.0f`), and stops wheel rotation (`wheel + 0x28 = 0.0f`).
   - **RigidBody Physical Velocity & Momentum Arrest**: In `SimVehicle + 0x2C` (`RigidBody`), hard-clamps all linear velocity ($V_x, V_y, V_z$), angular velocity ($\omega_x, \omega_y, \omega_z$), and momentum vectors to `0.0f` when speed drops below $3.0\text{ m/s}$ ($\sim 11\text{ km/h}$), and aggressively decelerates at higher speeds.
   - Enforced continuously in `OnCollisionForce`, `DamagePlayerCar`, `Update`, and `DelegateDriverInput` (`0x005ABBF0`), completely stopping dead AI racers from creeping forward or rolling down hills.
+- [x] **Race Intro Hand-off & PhysicsMover Pointer Stability Fix (`0x0040F697`)**:
+  - Fixed fatal `0xC0000005` access violation occurring the exact moment the race intro/countdown ended.
+  - Eliminated erroneous `*(uintptr_t*)(car + 0x2C) = mover` overwrite in `VehicleHealthManager_OnDelegateInput`.
+  - Restored proper `Car` memory map: `Car + 0x2C` remains native `mRigidBody*` (required by `Player::UpdateGameState` at `0x006027A0` / `0x0040F690`), and `PhysicsMover*` is resolved at `Car + 0x34`.
 - [x] **Wine-Compatible Hotkeys**:
   - **F8**: Full repair on all active vehicles.
   - **F9**: Damages player car by 25% for testing.

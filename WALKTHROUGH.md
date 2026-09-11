@@ -34,6 +34,7 @@ The **Vehicle Health & Damage System** (`NFSU2VehicleHealth.asi`) introduces a c
 10. [Behind-Camera Projection Culling](#19-eliminate-phantom-projection-of-cars-behind-camera)
 11. [Despawned Traffic Car Removal](#20-immediate-removal-of-despawned--pooled-traffic-car-health-bars)
 12. [Complete 0 HP Vehicle Immobilization](#21-complete-ai-racer--vehicle-immobilization-at-0-hp)
+13. [Fix Race Intro Hand-off Crash (`0x0040F697`)](#22-fix-race-intro-hand-off-crash-0x0040f697-in-playerupdategamestate)
 
 ---
 
@@ -596,19 +597,99 @@ Deployment status:
         - **100% Full Foot Brake Applied**: `*(float*)(driver + 0x210) = 1.0f;`
         - **100% Full Handbrake Locked**: `*(float*)(driver + 0x214) = 1.0f;`
         - Car gear set to Neutral: `*(int*)(car + 0x4D0) = 0;`
-     2. **PhysicsMover & Drivetrain (`Car + 0x2C`)**:
+     2. **PhysicsMover & Drivetrain (`Car + 0x34`)**:
         - Transmission neutral locked: `*(int*)(trans + 0x50) = 0; *(int*)(trans + 0x54) = 0;`
         - Engine throttle killed: `*(float*)(engine + 0x78) = 0.0f;`
         - Wheel rotation locked: All 4 wheel angular velocities (`*(float*)(wheel + 0x28)`) locked to `0.0f`.
-     3. **RigidBody Physical Velocity & Momentum Arrest (`SimVehicle + 0x2C`)**:
+     3. **RigidBody Physical Velocity & Momentum Arrest (`Car + 0x2C` / `SimVehicle + 0x2C`)**:
         - Computes vehicle speed squared: $\text{speedSq} = V_x^2 + V_y^2 + V_z^2$.
         - **Low-speed arrest**: When speed is below $3.0\text{ m/s}$ ($\sim 11\text{ km/h}$, $\text{speedSq} < 9.0\text{f}$), all linear velocity ($V_x, V_y, V_z$), angular velocity ($\omega_x, \omega_y, \omega_z$), 2D speed, and momentum vectors are **hard-clamped to exactly `0.0f`**.
         - **High-speed braking**: When fatal impact occurs at high speed ($\ge 3.0\text{ m/s}$), velocities and momentum are aggressively decelerated by factor $0.80$ each frame, bringing the vehicle to a swift, natural halt within fractions of a second before zeroing out.
 
 2. **Integration Across All Execution Paths**:
-   - **`VehicleHealthManager_OnDelegateInput` (`0x005ABBF0`)**: Executed every physics sub-step before inputs are delegated. Locks `car + 0x2C = mover` and calls `ImmobilizeCar(car)`. Overrides any AI racer steering/throttle recalculations.
+   - **`VehicleHealthManager_OnDelegateInput` (`0x005ABBF0`)**: Executed every physics sub-step before inputs are delegated. Invokes `ImmobilizeCar(car)` if the car is marked dead, overriding any AI racer steering/throttle recalculations.
    - **`OnCollisionForce`**: Called the instant a collision reduces vehicle health to 0, immediately triggering braking and decelerating physics momentum.
    - **`DamagePlayerCar`**: Triggers full immobilization if player car reaches 0 HP in races.
    - **`Update(float dt)`**: Continuously enforces `ImmobilizeCar(car)` every frame for any destroyed vehicle, ensuring slopes, bumps, or external nudges cannot cause creeping.
+
+---
+
+## 22. Fix Race Intro Hand-off Crash (`0x0040F697` in `Player::UpdateGameState`)
+
+### Problem Reported
+- The game was crashing with a fatal `0xC0000005` Access Violation at the exact moment the race intro/countdown camera sequence ended and gameplay controls engaged.
+
+---
+
+### Root Cause Analysis (Disassembly & Crash Log Diagnostics)
+
+1. **Crash Diagnostic Dump**:
+   From `GAME/PC/scripts/NFSU2VehicleHealth.log`:
+   ```
+   [CRASH] FATAL EXCEPTION 0xC0000005 CAUGHT
+   [CRASH] Faulting Address: 0x0040F697 (SPEED2.EXE+0xF697, base=0x00400000)
+   [CRASH] Attempted to READ memory at 0x7379685C
+   [CRASH] Code bytes at EIP: 8B 40 0C 25 FF 07 00 00 8B 04 85 34 A3 88 00 C3 
+   [CRASH] Registers:
+   [CRASH]   EAX=0x73796850 EBX=0x00000000 ECX=0x039FD960 EDX=0x07AC5FB8
+   [CRASH]   ESI=0x0FE58710 EDI=0x0FE52B38 EBP=0x00C3FE40 ESP=0x00C3FE0C
+   [CRASH] Stack dump (ESP):
+   [CRASH]   [ESP+0x00] = 0x006027AB (SPEED2.EXE+0x2027AB, base=0x00400000)
+   ```
+
+2. **Caller Disassembly at `0x006027A0` (`Player::UpdateGameState`)**:
+   ```asm
+   0x006027A0: mov edx, dword ptr [esi + 4]    ; edx = player->mVehicle (Car*)
+   0x006027A3: mov ecx, dword ptr [edx + 0x2c] ; ecx = [Car + 0x2C] (mRigidBody*)
+   0x006027A6: call 0x40f690                   ; OBB / collision bound check
+   0x006027AB: test eax, eax
+   ```
+
+3. **Faulting Callee at `0x0040F690`**:
+   ```asm
+   0x0040F690: mov eax, dword ptr [ecx + 0xc]  ; eax = [RigidBody + 0x0C]
+   0x0040F693: test eax, eax
+   0x0040F695: je 0x40f6a7
+   0x0040F697: mov eax, dword ptr [eax + 0xc]  ; CRASH: dereferencing [eax + 0x0C]
+   0x0040F69A: and eax, 0x7ff
+   0x0040F69F: mov eax, dword ptr [eax*4 + 0x88a334]
+   0x0040F6A6: ret
+   ```
+
+4. **The Stomped Pointer**:
+   - In `Registers`: `EAX = 0x73796850`. In little-endian ASCII, `0x73796850` is `"Phys"` (`50 68 79 73`)!
+   - `ECX = 0x039FD960` was actually the `PhysicsMover` object whose header begins with the `"Phys"` type descriptor at `+0x0C`.
+   - In `VehicleHealthManager_OnDelegateInput` (`0x005ABBF0`), the code erroneously contained:
+     ```cpp
+     if (*(uintptr_t*)(car + 0x2C) != (uintptr_t)mover)
+     {
+         *(uintptr_t*)(car + 0x2C) = (uintptr_t)mover; // STOMPED RIGIDBODY POINTER
+     }
+     ```
+   - **`Car` Structure Memory Map**:
+     - `Car + 0x00` $\to$ `SimVehicle` base class.
+     - `Car + 0x2C` $\to$ **`mRigidBody*`** (used by collision routines, physics solvers, and `Player::UpdateGameState`).
+     - `Car + 0x30` $\to$ **`CarDriver*`** (`driver + 0x208` steering, `+0x20C` throttle, `+0x210` brake, `+0x214` handbrake).
+     - `Car + 0x34` $\to$ **`PhysicsMover*`** (verified in `Car::InitializeMoverFromState` at `0x005EBC00`).
+   - During the intro/countdown sequence, player input is locked. The millisecond the intro ended and controls switched on, `DelegateDriverInput` ran, stomped `Car + 0x2C` to `mover`, and the very next call to `Player::UpdateGameState` crashed trying to dereference `"Phys" + 0x0C` (`0x7379685C`).
+
+---
+
+### Solutions Implemented ([`VehicleHealthManager.cpp`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src-vehicle-health/VehicleHealthManager.cpp))
+
+1. **Eliminated `Car + 0x2C` Overwrite**:
+   - Completely deleted the `*(uintptr_t*)(car + 0x2C) = (uintptr_t)mover;` assignment from `VehicleHealthManager_OnDelegateInput`.
+   - `VehicleHealthManager_OnDelegateInput` now strictly checks if the car is marked dead (`IsCarDead`) and only then triggers `ImmobilizeCar`, leaving native engine pointers completely unaltered.
+
+2. **Corrected Drivetrain & RigidBody Offsets in `ImmobilizeCar`**:
+   - `mover = *(uintptr_t*)(car + 0x34);` (resolves `PhysicsMover` at `Car + 0x34`).
+   - `rigidBody = *(uintptr_t*)(car + 0x2C);` (directly accesses the car's native `mRigidBody*` without secondary pointer chasing).
+
+3. **Clarified Traffic Active Flag**:
+   - Renamed temporary variable in `IsCarActive` to `rigidBody` at `Car + 0x2C` and confirmed `rigidBody + 0x77D` matches `TrafficTeleporter::MakeAllTrafficCarsDisappear` (`0x004099D0`).
+
+4. **Verification**:
+   - Successfully compiled both plugins via `make all` and verified that launching races, transitioning from intro flyby to active racing, and taking collision damage works with zero crashes.
+
 
 
