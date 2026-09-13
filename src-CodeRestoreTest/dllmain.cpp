@@ -6,6 +6,8 @@
 #include "restorations/CameraRestorations.h"
 #include "restorations/RaceModeRestorations.h"
 #include "restorations/CustomizationRestorations.h"
+#include "restorations/RegionalCarsRestoration.h"
+#include "restorations/DemoCareerRestorations.h"
 #include "restorations/GameplayRestorations.h"
 #include "restorations/EngineFixes.h"
 #include "restorations/FEngRestorations.h"
@@ -91,6 +93,18 @@ void InitRestorations()
     {
         RaceModeRestorations::InstallAnyTrackInAnyMode();
         Logger::Log("[+] Restored: Any Track in Any Race Mode (with crashy stub filtering)");
+    }
+
+    if (g_Config.unlockRegionalCars)
+    {
+        RegionalCarsRestoration::Install();
+        Logger::Log("[+] Restored: Regional cars (Peugeot 106) in Car Lot / Quick Race car select");
+    }
+
+    if (g_Config.restoreEncounterOpponentCleanup)
+    {
+        DemoCareerRestorations::Install();
+        Logger::Log("[+] Restored: PS2 Demo career encounter opponent cleanup (DEACTIVATE_OPPONENT state)");
     }
 
     if (g_Config.fixDisappearingWheels)

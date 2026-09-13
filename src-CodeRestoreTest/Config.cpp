@@ -18,6 +18,10 @@ void PluginConfig::Load(const char* iniPath)
     restoreLapKOInQR             = ini.ReadInteger("Restorations", "RestoreLapKOInQR", 1) != 0;
     restoreVehicleDamage         = ini.ReadInteger("Gameplay", "RestoreVehicleDamage", ini.ReadInteger("Restorations", "RestoreVehicleDamage", 1)) != 0;
 
+    unlockRegionalCars           = ini.ReadInteger("Cars", "UnlockRegionalCars", 1) != 0;
+
+    restoreEncounterOpponentCleanup = ini.ReadInteger("DemoCareer", "RestoreEncounterOpponentCleanup", 1) != 0;
+
     fixDisappearingWheels        = ini.ReadInteger("Fixes", "FixDisappearingWheels", 1) != 0;
     fixAudioPathCrash            = ini.ReadInteger("Fixes", "FixAudioPathCrash", 1) != 0;
     fixMissingBarriersCrash      = ini.ReadInteger("Fixes", "FixMissingBarriersCrash", 1) != 0;

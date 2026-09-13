@@ -98,6 +98,8 @@ The project contains two distinct plugins:
   - Lap count modifier restored for URL races.
   - Pause Menu "Restart Race" enabled across all race modes.
   - Hidden Special Vinyls category (`0x1C`) unlocked.
+  - Cut regional cars (Peugeot 106 / Opel Corsa) re-enabled in the Car Lot, Quick Race car select and AI opponent pool (adapted from NFSU2 Extra Options "Remove Region Car Lock"; applied per-car when the model data exists on disc).
+  - PS2 Demo career behavior restored: the demo's cut `RandomEncounterManager` `DEACTIVATE_OPPONENT` state, so engaged outrun opponent cars are deactivated and returned to the world pool after career free-roam encounters.
 - **Engine Stability & Bug Fixes**:
   - **`PATH_status` Audio Crash Fix (`0x0073927D`)**: Prevents fatal `0xC0000005` access violations caused by asynchronous sound engine cleanup zeroing bank pointers.
   - **Track 4000 Missing Barrier Crash Fix**: Bypasses missing barrier package stream crashes when starting Track 4000 in Circuit mode.

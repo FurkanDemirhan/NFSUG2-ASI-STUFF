@@ -691,5 +691,111 @@ Deployment status:
 4. **Verification**:
    - Successfully compiled both plugins via `make all` and verified that launching races, transitioning from intro flyby to active racing, and taking collision damage works with zero crashes.
 
+---
+
+## 23. Regional Cars Restoration (Peugeot 106 / Opel Corsa)
+
+### Problem Statement
+Per the project roadmap ("Regional Cars & Traffic Car Unlocking"): the US release of NFSU2 hides two cut regional cars — the **Peugeot 106** and the **Opel Corsa** — from every car list, even though the Peugeot 106 model data still ships on the retail disc (`CARS\PEUGOT\GEOMETRY.BIN` + `TEXTURES.BIN` + `VINYLS.BIN` + `PARTS_ANIMATIONS.bin`). The Opel Corsa model data was cut from the disc entirely.
+
+### Root Cause Analysis (i64-mcp / `NFSUnderground2-v1.2-US.i64`)
+
+1. **The region gate**: `IsCarAvailableInCurrentBuildRegion(CarType)` at `0x5022C0`:
+   ```asm
+   0x5022C0: mov  al, byte ptr [0x838464]   ; UnlockAllThings -> always available
+   0x5022C9: call 0x570A30                   ; GetBuildRegion()
+   ; region == 0 (US build):
+   0x5022D6: mov  eax, 0x7F7C48              ; "EUExclusiveCars" = { 7 CORSA, 6 PEUGOT106 }
+   ; region != 0 (EU/ROW build):
+   0x5022F1: mov  eax, 0x7F7C50              ; "USExclusiveCars" = { 5 CIVIC, 18 RSX }
+   ; scan table of 32-bit car-type IDs:
+   0x5022E0: cmp  dword ptr [eax], ecx
+   0x5022E2: je   0x502307                   ; found  -> xor eax,eax / ret  (EXCLUDED)
+   0x5022E4: add  eax, 4
+   ; not found -> mov al,1 / ret  (AVAILABLE)
+   ```
+   The exclusion tables are DWORD arrays: `0x7F7C48` = `{ 7, 6 }` (CORSA, PEUGOT106) for the US build, `0x7F7C50` = `{ 5, 18 }` (CIVIC, RSX) for EU/ROW builds. The IDA names are from the EU build's perspective (`EUExclusiveCars` = cars excluded *in* the US build).
+   - `UnlockAllThings` (`0x838464`, the same global the F5 hotkey toggles) short-circuits the check to always-available.
+
+2. **The only callers** (confirmed via the IDA xref database, 2 callers total):
+   - `UICareerCarLot::BuildCarList` — call site `0x4DFA83` (`call 0x5022C0` / `add esp, 4` / `test al, al`).
+   - `UIQRCarSelect::BuildCarList` — call site `0x4E2374` (`call 0x5022C0` / `add esp, 4` / `test al, al` / `je <skip car>`).
+
+3. **The AI opponent pool**: `PickRandomCarsOfSomeSort` (`0x4FEAF0`) draws random AI cars from `RandomlyChooseableCarConfigsNorthAmerica` (table at `0x7F6DA4`):
+   ```asm
+   0x4FEB9C: mov  ebp, 0x1A                  ; element count (26 native entries)
+   0x4FEBA1: mov  esi, 0x7F6DA4              ; NA table
+   0x4FEBA6: je   0x4FEBAD
+   0x4FEBA8: mov  esi, 0x7F6DC0              ; EU table (region != 0)
+   ```
+   The two bytes after the NA table (`0x7F6DBE`, `0x7F6DBF`) are unused padding — free slots for appended car types.
+
+4. **Every patch-site byte verified** against the local `SPEED2.EXE` (entry point `0x75BCC7`): table entries `07 00 00 00 | 06 00 00 00 | 05 00 00 00 | 12 00 00 00`, `E8` call sites, and the `1A` count immediate.
+
+### Solution Implemented ([`RegionalCarsRestoration.cpp`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src-CodeRestoreTest/restorations/RegionalCarsRestoration.cpp))
+Adapted from NFSU2 Extra Options "Remove Region Car Lock" (`Reference-Code/NFSU2ExOpts/ExtraOptionsStuff.h` + `CodeCaves.h`), with byte-exact verification against this binary:
+
+1. **Exclusion entry neutering**: writes `0xFF` to the low byte of a table entry, turning the DWORD into `0x0000FFxx` which can never match a real car type:
+   - `0x7F7C4C` = `0xFF` (PEUGOT106) when `CARS\PEUGOT106` **or** `CARS\PEUGOT` model data exists.
+   - `0x7F7C48` = `0xFF` (CORSA) when `CARS\CORSA` model data exists.
+   - `0x7F7C50` / `0x7F7C54` = `0xFF` (CIVIC/RSX, as in the original; consulted only on EU/ROW builds).
+   With the entry gone, `IsCarAvailableInCurrentBuildRegion` falls through to "available" — the car re-enters the Car Lot and Quick Race car select.
+2. **Region-lock bypass hooks** (`bool __cdecl RegionLockHook(int CarID) { return 1; }` installed over both call sites) — only when **every** car type excluded by the current region's table has model data on disc (identical safety condition to Extra Options' `DoesFileExist` gate). On US installs without Corsa data, the entry-neutering alone is sufficient and the hooks are skipped so the data-less Corsa can never be selected.
+3. **AI opponents**: unlocked car types are appended to the free slots at `0x7F6DBE`/`0x7F6DBF` and the count immediate at `0x4FEB9D` is extended (`0x1A` $\to$ `0x1A + N`, max `0x1C`), letting AI opponents drive the Peugeot 106.
+4. **File existence checks** use `..\CARS\...` paths (ExOpts' `DoesFileExist`/`stat` helper): the Ultimate ASI Loader sets the current directory to `scripts\` before loading ASI plugins, so `..` resolves to the game root (verified under Wine: CWD at `DllMain` = `...\GAME\PC\scripts`).
+5. Configurable via `[Cars] UnlockRegionalCars` in `NFSU2CodeRestoration.ini` (default `1`). Idempotent when NFSU2 Extra Options with `UnlockRegionals` is also installed.
+
+### Build Note
+File paths inside the plugin must not be assumed CWD-relative: `Logger` resolves against the game EXE (`GetModuleFileNameA(NULL)`), `CIniReader` resolves against the ASI module (so `scripts/...`-style INI paths resolve to `scripts\scripts\...` and silently fall back to compiled defaults), and data files under the game root must be reached via `..\` (UAL sets CWD to `scripts\`) or via EXE-relative paths.
+
+---
+
+## 24. Research: `LS_LangSelect` Bootflow Screen (Dead End On PC)
+
+### Findings (i64-mcp / `NFSUnderground2-v1.2-US.i64`)
+While investigating the roadmap item "Restore `LS_LangSelect.fng` (language selection bootflow screen)":
+
+1. The `LanguageSelectScreen` class is **fully intact** in the PC v1.2 binary:
+   - String `LS_LangSelect.fng` at `0x7999A8`.
+   - `CreateLanguageSelectScreen__FP21ScreenConstructorData` at `0x4F48A0` — mallocs `0x150` bytes, constructs an `IconScrollerMenu` (`0x552330`), and sets the vtable to `_vt.20LanguageSelectScreen` (`0x797CF8`).
+   - `LanguageChangerCallback__F12JoystickPort8JoyEventUcPv` at `0x527520`.
+   - `SetCurrentLanguage__F10eLanguages` (`0x512360`), `LoadCurrentLanguage__Fv` (`0x512520`), `PC_GetOSLanguage__Fv` (`0x5B7AF0`) — the PC bootflow auto-detects the OS language instead of showing the screen.
+   - The screen is registered in the FE screen constructor table (~`0x7F8C14`, 24-byte records: `{ flag 0x80, FNG name pointer, constructor pointer }`).
+2. **The blocker**: the `LS_LangSelect.fng` **data file does not ship on the PC disc** (no `LS_LangSelect.fng` anywhere under `GAME/PC`). Forcing the bootflow onto this screen without the FNG asset would fail to load the screen's FE objects.
+
+### Conclusion
+Restoring the language-select bootflow screen requires importing the console `LS_LangSelect.fng` asset (PS2/GameCube builds) and, if it references console-specific resources, porting those too. Deferred until FNG asset extraction from the PS2 Alpha 10 / GameCube builds is undertaken.
+
+---
+
+## 25. PS2 Demo Career Research & `DEACTIVATE_OPPONENT` Restoration
+
+### Research Goal
+Diff the PS2 Demo ELF (`SLUS_291.18`) against the retail PC build to find career-related code that differs, and port the demo's behavior into retail via INI-gated ASI hooks.
+
+### Research Method & Limitations
+- The demo ELF is **stripped**: no `.symtab`, and `.mdebug.eabi64` is empty. The i64-mcp database for the demo (radare2 import, 8845 functions) has no symbol names and no usable xrefs/function boundaries, so analysis ran through custom capstone scans (`lui/addiu`, `lui/ori` pair scanning for string references, raw pointer scans of `.data`, `$gp = 0x460BF0` from `.reginfo`).
+- String/enum/assert diffs (demo strings minus retail strings) were the most productive signal; retail compiled out asserts and debug enum names, so only *live* string references (verified by finding a `lui/addiu` code pair) count as evidence.
+- Confirmed live reference example: `"Scroll_Bar"` (`0x385BD0`) referenced at demo `.text 0x1BEB58` inside the `UICareerCarLot` screen constructor (table entry at `.data 0x406BE4`, constructor `0x1BEAF0`, same 24-byte `{0x80 flag, FNG name ×2, ctor}` record layout as the PC screen table at `~0x7F8C14`).
+
+### Verified Demo-vs-Retail Differences
+1. **`RandomEncounterManager` state machine**: the demo's enum-name table at demo `.data 0x3B8DB0` holds **six** state strings ending in `eRANDOM_ENCOUNTER_MANAGER_STATE_DEACTIVATE_OPPONENT`; retail keeps only five (`NONE`, `POLL_CAREER`, `LOADING_OPPONENTS`, `TRYING_TO_ENGAGE`, `RACING`). The sixth state — returning the engaged outrun opponent to the world pool after the encounter — was **cut from retail**.
+2. **Cut career screens** (strings absent from retail entirely; code absent too): `MU_UG_ChooseCareerCar.fng` (choose between two preset 350Z builds, cf. `DEMO_CARLOT_350Z_A/B`), `MU_UG_TradeCareerCar.fng` (career car trade-in), `MU_UG_SamanthaGiveth.fng` (Samantha intro hand-off). Restoring these requires extracting FNG assets from the demo disc data.
+3. **`EVENT_REWARD_EVENT_%d_UNIQUE`** (demo `.rodata 0x388080`): a per-event *unique reward* lookup scheme not present in retail.
+4. **Demo map content**: `BARRIERS_DEMO` / `PLAYER_BARRIERS_DEMO` barrier packages for the demo's career free-roam slice; `GAME_TIP_DEMO_*_SHOP` strings.
+5. **2P career remnants**: `GarageMain_2P.fng`, `2PHudBot/Top.fng`, `GarageMainScreen2P` — split-screen career/garage UI still in the demo build.
+6. Non-differences worth recording: `RaceStarter::AddCareerEventAIOpponents` (retail `0x5260B0`), `AddRandomEncounterCars` (retail `0x53F000`), `RandomEncounterManager::TryToEngagePlayer` (`0x413030`), `GetCarThatCanBeEngaged` (`0x40C030`), and all `CAREER_*` event/shop strings exist in both builds — the demo career is a slice of the same retail career codebase.
+
+### Solution Implemented ([`DemoCareerRestorations.cpp`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src-CodeRestoreTest/restorations/DemoCareerRestorations.cpp))
+Re-implements the demo's cut `DEACTIVATE_OPPONENT` state using retail-verified structures:
+
+1. **Encounter opponent tracking**: `RandomEncounterManager::TryToEngagePlayer` (`0x413030`) polls candidates per player and stores the current opponent in `Player + 0x250` (`mov [edi+0x250], esi`), iterating the `Player*` array at `0x8900B4` (count `0x8900BC`).
+2. **Race transition watch** (main-loop tick): when `TheRace` (`0x890118`) transitions `NULL -> non-NULL`, every player's `Player + 0x250` candidate that was actually promoted to a racer (`Car + 0x1C` RacingCar non-zero, and not the player's own car at `Player + 4`) is captured; when `TheRace` returns to `NULL`, each captured opponent that is still present in `TheWorld` (`0x890080`, count at `+0x10`, array at `+0x1C`) and still active gets deactivated.
+3. **Deactivation primitive**: writing `0` to `Car + 0x550` (`mIsActive`) — the exact store `Car::SetRenderingEnabled` (`0x5ED5C0`) performs and what the engine's own traffic despawn path (`TrafficController` at `0x42C92A` / `0x4099FD`) uses; the pool then reclaims the car.
+4. Pointer plausibility checks guard every dereference; the whole behavior is gated by `[DemoCareer] RestoreEncounterOpponentCleanup` (default `1`).
+
+### Verification Status
+Compiled and deployed; **in-game testing pending** (INI-toggleable).
+
 
 

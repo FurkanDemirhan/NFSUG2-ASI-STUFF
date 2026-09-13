@@ -43,6 +43,8 @@ Only project source, scripts, environment, and documentation are tracked by Git:
   - [`src-CodeRestoreTest/restorations/FngData_HUD_CarShow.cpp`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src-CodeRestoreTest/restorations/FngData_HUD_CarShow.cpp): Restored and fixed binary package data for `HUD_CarShow.fng` (backing plates, minimap tracking, tachometer cleanups).
   - [`src-CodeRestoreTest/restorations/VehicleDamageRestorations.cpp`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src-CodeRestoreTest/restorations/VehicleDamageRestorations.cpp) / [`src-CodeRestoreTest/restorations/VehicleDamageRestorations.h`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src-CodeRestoreTest/restorations/VehicleDamageRestorations.h): Restores cut vehicle part damage, 3-stage wobbling animations (`WINDOW_DAMAGE0..2`), dynamic flapping hinges (doors/trunk), collision impulse delivery, and severe crash detachment (`4.0f` threshold).
   - [`src-CodeRestoreTest/restorations/CustomizationRestorations.cpp`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src-CodeRestoreTest/restorations/CustomizationRestorations.cpp): Restores hidden Special Vinyls category (`0x1C`).
+  - [`src-CodeRestoreTest/restorations/RegionalCarsRestoration.cpp`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src-CodeRestoreTest/restorations/RegionalCarsRestoration.cpp): Restores cut regional cars (Peugeot 106 / Opel Corsa) into the Car Lot, Quick Race car select and AI opponent pool (adapted from NFSU2 Extra Options "Remove Region Car Lock", verified against the v1.2 US IDA database).
+  - [`src-CodeRestoreTest/restorations/DemoCareerRestorations.cpp`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src-CodeRestoreTest/restorations/DemoCareerRestorations.cpp): Restores the PS2 Demo's cut `RandomEncounterManager` `DEACTIVATE_OPPONENT` state (encounter opponent cleanup after outrun engagements), driven by `TheRace` transitions and the `Player + 0x250` encounter-car field.
   - [`src-CodeRestoreTest/restorations/EngineFixes.cpp`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src-CodeRestoreTest/restorations/EngineFixes.cpp) / [`src-CodeRestoreTest/restorations/EngineFixes.h`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src-CodeRestoreTest/restorations/EngineFixes.h): Disappearing wheels fix in `CarPartCuller`, internal `DebugWorldCameraMover`, and `PATH_status` audio bank null crash fix (`0x0073927D`).
   - [`src-CodeRestoreTest/restorations/GameplayRestorations.cpp`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src-CodeRestoreTest/restorations/GameplayRestorations.cpp): Main loop tick at `0x581470`, F6 Autopilot (`Player_AutoPilotOn/Off`), F5 Unlock All, F7 Cycle Damage Stages.
 - `src-vehicle-health/` — C++ source code for the vehicle health and disqualification plugin (`NFSU2VehicleHealth.asi`):
@@ -136,6 +138,29 @@ Only project source, scripts, environment, and documentation are tracked by Git:
 - [x] **In-Game Testing Hotkey (F7)**:
   - Pressing **F7** cycles player damage stages directly: `0.0f` (Repaired) -> `0.6f` (Stage 1) -> `1.5f` (Stage 2) -> `2.8f` (Stage 3) -> `4.5f` (Detached).
 
+### F. Regional Cars Restoration
+- [x] **Cut Regional Cars Unlock (Peugeot 106 / Opel Corsa)**:
+  - Reverse-engineered `IsCarAvailableInCurrentBuildRegion` (`0x5022C0`): excludes car types by scanning a per-region table of 32-bit car-type IDs and returning false on any match.
+    - US build (`GetBuildRegion() == 0`): scans `EUExclusiveCars` (`0x7F7C48` = `{ 7 CORSA, 6 PEUGOT106 }`).
+    - EU/ROW build: scans `USExclusiveCars` (`0x7F7C50` = `{ 5 CIVIC, 18 RSX }`).
+    - Its only callers are `UICareerCarLot::BuildCarList` (call site `0x4DFA83`) and `UIQRCarSelect::BuildCarList` (call site `0x4E2374`).
+  - Neuters the exclusion entries (low byte $\to$ `0xFF`, making the entry `0x0000FFxx` and unmatchable) for cars whose model data exists on disc (`CARS\PEUGOT` still ships on US retail discs; `CARS\CORSA` was cut entirely).
+  - `CIVIC`/`RSX` entries (`0x7F7C50`/`0x7F7C54`) written as in the original (no-op on US builds, fixes EU/ROW copies).
+  - Region-check bypass hooks (`bool __cdecl RegionLockHook(int) { return 1; }`) installed only when every car excluded by the current region's table has model data, matching Extra Options' file gate.
+  - Unlocked car types appended to `RandomlyChooseableCarConfigsNorthAmerica` (table `0x7F6DA4`, free slots `0x7F6DBE`/`0x7F6DBF`) with the element count extended (`mov ebp, 0x1A` immediate at `0x4FEB9D` in `PickRandomCarsOfSomeSort`), letting AI opponents drive them.
+  - Adapted from NFSU2 Extra Options `UnlockRegionals` (`Reference-Code/NFSU2ExOpts`); configurable via `[Cars] UnlockRegionalCars` in `NFSU2CodeRestoration.ini`. Idempotent if Extra Options with `UnlockRegionals` is also installed.
+
+### G. PS2 Demo Career Behavior Restoration
+- [x] **`DEACTIVATE_OPPONENT` Encounter Cleanup (PS2 Demo `RandomEncounterManager` state cut from retail)**:
+  - Research (see WALKTHROUGH section 25): the demo's encounter-manager enum table (demo `.data 0x3B8DB0`) has six states ending in `DEACTIVATE_OPPONENT`; retail kept five. The demo used the sixth state to return the engaged outrun opponent to the world pool after the encounter; retail tears the race down without it.
+  - Retail-side anchors verified via IDA: `RandomEncounterManager::TryToEngagePlayer` (`0x413030`) stores the polled encounter opponent in `Player + 0x250` (player array at `0x8900B4`, count `0x8900BC`); a promoted opponent has a live `RacingCar*` at `Car + 0x1C`; deactivation = clearing `Car + 0x550` (`mIsActive`), matching the engine's own traffic despawn store (`Car::SetRenderingEnabled` `0x5ED5C0`, called from `TrafficController` `0x42C92A`/`0x4099FD`).
+  - Implementation: main-loop tick watches `TheRace` (`0x890118`) transitions, captures promoted encounter opponents at race start, deactivates them (pool reclaim) at race end, with pointer plausibility and world-membership checks.
+  - Configurable via `[DemoCareer] RestoreEncounterOpponentCleanup` (default `1`). **In-game testing pending.**
+- [ ] **Further demo career findings (documented, not yet portable — asset-dependent)**:
+  - Cut career screens `MU_UG_ChooseCareerCar.fng` (two preset 350Z builds), `MU_UG_TradeCareerCar.fng` (car trade-in), `MU_UG_SamanthaGiveth.fng` — absent from retail code and assets; require demo disc FNG extraction.
+  - `EVENT_REWARD_EVENT_%d_UNIQUE` per-event unique reward scheme (demo `.rodata 0x388080`).
+  - Split-screen career remnants: `GarageMain_2P.fng`, `2PHudBot/Top.fng`, `GarageMainScreen2P`.
+
 ### E. Vehicle Health & Damage System (`NFSU2VehicleHealth.asi`)
 - [x] **Collision Physics Impulse Hooking (`0x005A0BC4`)**:
   - Hooked `CarCollisionBody::AddDamage` inside `ApplyImpulse` at `0x005A0BC4` with a naked assembly trampoline.
@@ -184,11 +209,15 @@ Only project source, scripts, environment, and documentation are tracked by Git:
 
 ## 5. Next Steps & Research Vectors
 1. **Regional Cars & Traffic Car Unlocking**:
-   - Investigate unlocking Peugeot 106, Opel Corsa, and traffic vehicle meshes for Quick Race.
+   - [x] Peugeot 106 unlock implemented (`RegionalCarsRestoration.cpp`, see section 4.F). Opel Corsa auto-activates once `CARS\CORSA` model data is provided.
+   - **Traffic vehicle meshes for Quick Race**: the car select screens read one of two `FEPlayerCarDB` instances selected by `UIQRCarSelect + 0x5C`: showroom DB at `0x83AD90`, second DB at `0x8458DC` (stride `0xAB4C`, 0x5B car record slots at `+0x9BD8`, per-record unlock-filter bitmask at `+0x14`, unique-car unlocked byte at `+0x7F5`, car type at `+0x8`). Investigate which game modes set the DB slot to 1 and whether the second DB holds drivable traffic configurations.
 2. **Cut HUD / UI Screens**:
-   - Restore `LS_LangSelect.fng` (language selection bootflow screen).
-   - Investigate split-screen 2P HUD remnants (`2PHudBot.fng`, `2PHudTop.fng`) identified in PS2 Alpha 10.
+   - `LS_LangSelect.fng` (string at `0x7999A8`): the `LanguageSelectScreen` class is fully present in the PC binary (`CreateLanguageSelectScreen` at `0x4F48A0`, vtable `_vt.20LanguageSelectScreen` at `0x797CF8`, `LanguageChangerCallback` at `0x527520`) and registered in the FE screen constructor table (~`0x7F8C14`), but the `LS_LangSelect.fng` data file does **not** ship on the PC disc — restoration requires importing the console FNG asset.
+   - **PS2 Demo career screens** (from WALKTHROUGH section 25): `MU_UG_ChooseCareerCar.fng`, `MU_UG_TradeCareerCar.fng`, `MU_UG_SamanthaGiveth.fng` exist only in the demo build (code + assets) — porting needs FNG extraction from the demo disc data (`ZZDATA0-3` / `Unpacked`).
+   - Investigate split-screen 2P HUD remnants (`2PHudBot.fng`, `2PHudTop.fng`) identified in PS2 Alpha 10 — the PS2 Demo still contains `GarageMain_2P.fng` and `GarageMainScreen2P`.
 3. **Cut Audio & Radio Chatter**:
    - Explore unused voice lines and SMS message triggers in GameCube/PS2 builds.
+4. **PS2 Demo research tooling**:
+   - The demo ELF is stripped (no symtab; `.mdebug` empty). The i64-mcp demo DB has no names/xrefs. The working method: capstone `lui/addiu|ori` pair scans + `.data` pointer scans against the ELF directly (see `/tmp/demo_xref.py` approach in WALKTHROUGH 25) and string-set diffs against retail. Consider importing a proper IDA MIPS analysis of the demo into the MCP workspace for future ports.
 
 

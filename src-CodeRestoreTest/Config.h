@@ -14,6 +14,12 @@ struct PluginConfig
     bool restoreLapKOInQR              = true;
     bool restoreVehicleDamage          = true;
 
+    // Regional / Cut Cars
+    bool unlockRegionalCars            = true;
+
+    // PS2 Demo Career Behavior
+    bool restoreEncounterOpponentCleanup = true;
+
     // Fixes & Debugging
     bool fixDisappearingWheels         = true;
     bool fixAudioPathCrash             = true;

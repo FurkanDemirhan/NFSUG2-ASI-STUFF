@@ -1,6 +1,7 @@
 #include "GameplayRestorations.h"
 #include "BurnoutRestorations.h"
 #include "VehicleDamageRestorations.h"
+#include "DemoCareerRestorations.h"
 #include "../GameAddresses.h"
 #include "../Config.h"
 #include "../includes/injector/injector.hpp"
@@ -69,6 +70,10 @@ static void __cdecl MainLoopHook()
     if (g_Config.restoreVehicleDamage)
     {
         VehicleDamageRestorations::Update(1.0f / 60.0f);
+    }
+    if (g_Config.restoreEncounterOpponentCleanup)
+    {
+        DemoCareerRestorations::Update();
     }
 }
 
