@@ -797,5 +797,90 @@ Re-implements the demo's cut `DEACTIVATE_OPPONENT` state using retail-verified s
 ### Verification Status
 Compiled and deployed; **in-game testing pending** (INI-toggleable).
 
+---
+
+## 26. Vehicle Part Damage System — Full Re-Reverse & Fix (PS2 Demo Cross-Reference)
+
+### Problems Reported
+1. Part wobbling never visibly worked.
+2. Some parts never received any damage.
+
+### Research Method
+With the IDA MCP offline, the whole system was re-reversed locally: capstone disassembly of `SPEED2.EXE` regions, the PS2 Demo ELF (MIPS, `lui/addiu` pair scanning for table references), the project's cached IDA symbol dump (`cache/pc_v12_symbols.json`) for function identification, and raw byte scans for table/constant verification.
+
+### The Engine's Damage System (fully mapped, all symbols resolved)
+| Address | Symbol | Role |
+|---|---|---|
+| `0x637C70` | `CarDamage::AddDamage(bVector3*, float)` | Per-impact entry: distributes to sectors + breakable parts |
+| `0x61CDD0` | `CarPartDamage::AddDamage(bVector3*, float)` | `damage[part] += 5.0 * cellWeight * force` |
+| `0x610D30` | `CarPartDamage::FindDamageSector(bVector3*)` | Car-local position → 4×3×2 grid cell (x=len 4 cells, y=width 3, z=height 2) |
+| `0x610E00` | `CarDamage::InitSectorPositions(eModel*)` | Fills the grid bounds from the car model — **only for 15 hashed models** |
+| `0x610B00` | `InitCarPartDamageSectors()` | Writes default grid weights at `0x8A0388` (most cells left zero) |
+| `0x610F30` | `CarDamage::AddDamageToSector(int, float, float)` | Body deformation (1/128 scale) |
+| `0x615240` | `CarPartDamage::IsPartDamaged(int)` | `dmg > 0.25` && part enabled |
+| `0x610CD0` | `CarPartDamage::UpdateDamage()` | **Gutted**: buckets damage against `{0.25, 1.0, 2.0}` and discards the result |
+| `0x61CFE0` | `CarPartDamage::SetDamageAmount(CarDamageAmount)` | Debug/enum damage setter |
+| `0x633E70` / `0x63A360` | `CarPartDamage` / `CarDamage` ctors | CarDamage linked-list at `0x8A2C9C`, car-name hash at `CarDamage+4` |
+
+**Layout**: `Car + 0x958` = `CarDamage*`; `CarDamage+0x100` = `CarPartDamage`; **per-part damage floats = `CarDamage+0x120 + part*4`** (saturating at `4.0 − 0.01`, `0x78425C`); stage thresholds `0x803934 = {0.25, 1.0, 2.0}`, detach `0x803940 = 4.0` — **identical to the PS2 Demo's tables at `0x446190`**. Part-info table `0x803698` (6 × 0x10): `+0x00` enable flag (**all zero in vanilla — the master kill-switch**), `+0x0C` render node id `{32,32,16,10,17,18}` used by `CarRenderInfo::Render`'s part search.
+
+**The PS2 Demo's authentic wobble**: `CarPartDamage::UpdateDamage` (`0x2D4928`) bucketed each part's damage into stages 0..3 via the same threshold table, then **played baked keyframe animations on per-part animation channels** (channel table `0x4461A0 = {45..49}`; the channel object's current-anim byte at `+0x11` is compared against the stage). Retail's orphaned copy at `0x803944 = {47..51}` (IDs shifted +2) confirms the same subsystem existed; the dispatch itself was cut and **no retail code references the table**. Retail's render site (`CarRenderInfo::Render` `0x624436`–`0x62449E`) instead does: `IsPartDamaged` → `malloc(0x40)` → **jump past `eMesh::Render` (`0x5C5930`)** — damaged parts vanish and leak 64 bytes per part per frame.
+
+### Root Causes Found
+1. **"Some parts don't get damaged at all"** — `InitSectorPositions` (`0x610E00`, called once from the `CarRenderInfo` ctor at `0x63892A`) matches the car sub-model hash against **only 15 entries at `0x8036FC`**. Unmatched cars keep an invalid damage grid → `FindDamageSector`'s `(pos − min)/(max − min)` divisions degenerate → the converted cell index clamps to **cell 0** → only the weights of cells 0–1 (trunk/right-door) ever apply. Additionally most of the 24 grid cells have zero weight even after `InitCarPartDamageSectors`, and zero-weight cells swallow damage entirely.
+2. **"Wobbling doesn't work"** — the previous implementation's render-side mechanism (code cave at `0x624441` + matrix substitution at the `eMesh::Render` call `0x624499`) is structurally sound — every link was verified: the `[esp+0x180]` slot holds `CarDamage*` (the same `this` `IsPartDamaged` receives), `[esp+0x64]` is the part index found by the node-id search loop at `0x6230EA`, the cave's stack math and the `eViewPlatInterface::Render(eModel*, bMatrix4*, eLightContext*, uint, uint)` signature all check out, and `ebx` (the matrix passed to the mesh render) is the shared car-world matrix, so pre-multiplying a car-local pivot wobble (`v' = v · Wobble · CarWorld`) is the correct composition. The actual failure: the previous wobble angles were **0.5–0.8° symmetric jitter** — mathematically applied but visually imperceptible, unlike the demo's dramatic baked door-swing/mirror-droop animations. The previous hook also *replaced* the authentic damage distribution with a hand-rolled quadrant heuristic on top of it, fighting the engine's grid system.
+
+### Fixes Implemented ([`VehicleDamageRestorations.cpp`](file:///mnt/D2/AI/VC/NFSUG2-CodeRestrationTest/src-CodeRestoreTest/restorations/VehicleDamageRestorations.cpp))
+1. **Authentic damage delivery restored**: the `CarDamage::AddDamage` call-site hook (`0x593C44`) no longer assigns part damage itself — it sanitizes/amplifies the force (×2.5) and lets the engine's own chain (`CarDamage::AddDamage` → `CarPartDamage::AddDamage` → `FindDamageSector` → grid weights) distribute damage exactly as designed.
+2. **Generic damage-grid fallback**: hooking the `InitSectorPositions` call site (`0x63892A`): after the original runs, cars whose grid stayed invalid (unmatched model hash) receive a generic full-car grid (x ∈ [−2.5, 2.5] length, y ∈ [−1.3, 1.3] width, z ∈ [−0.3, 1.8] height) so all 4×3×2 cells resolve for **every** car.
+3. **Zero-weight cells filled** (kept from the previous implementation): after `InitCarPartDamageSectors`, all 24 cells get non-zero per-part weights.
+4. **Demo-scale wobbling**: `ComputePartWobbleAngles` rewritten to model the demo's baked animations — progressive droop per stage (doors swing ajar up to ~28° at stage 3, mirrors droop ~31°, trunk pops ~14°, exhaust sags) with rattle oscillation on top, instead of sub-degree jitter. The pivot-invariant matrix construction (`P · M = P`) is unchanged and correct.
+5. **All previous engine enable-patches kept**: part-enable flags (`0x803698`, the vanilla master kill-switch), global damage flags (`0x89E7D2`/`0x870CCC`/`0x8764E4`), graphics-preset override NOP (`0x5BE6F7`), race-load force-enable (`0x540033`), wild-collision trigger (`0x59FC13`), force-threshold gate NOP (`0x637C7A`), the `UpdateDamage` stage packer for window-cracking bits, the render capture caves, and the mirror render hooks.
+6. **F7 diagnostic** logs the resolved `CarDamage*` so a wrong pointer is immediately visible in `NFSU2CodeRestoration.log`.
+
+### Verification Status
+Compiles clean and deployed; **in-game testing pending**. Quick test recipe: F7 to Stage 2 — all four doors/trunk/exhaust should visibly sag/swing with rattle; Stage 4 detaches them. Crash into walls/traffic — every part should now accumulate damage (first 24 hits logged).
+
+### Fix Pass 2 — In-Game Feedback (per-part render blocks & matrix spaces)
+In-game testing revealed three issues: **rotations were wrong** (trunk and mirrors swung wildly off the car), and **wobbling stopped while driving**. Root causes found by mapping `CarRenderInfo::Render` further:
+
+1. **The render function is unrolled per part.** Beyond the generic blocks, dedicated blocks compute door flags (`0x622FCC`, parts 4/5, enables at `0x8036D8`/`0x8036E8`, damage at `+0x130`/`+0x134`) and per-part renders exist for the mirrors (`0x6264E7`/`0x626A58`) and a third variant (`0x626F29`).
+2. **Two generic part blocks feed the shared `eMesh::Render` call at `0x624499` with matrices in different spaces**: block `0x624441` passes the shared car-world matrix (register `ebx`), while block `0x624404` passes a **per-part matrix from an array** (`edx = [eax + ecx*4]`, index from `[esp+0x6C]`). The previous implementation only evaluated the second block (`0x624441`) — the per-part-matrix path (used while driving) never wobbled, and pivots tuned for one space misbehaved in the other.
+3. Displacement magnitudes showed the car-space hinge pivots only fit some parts/spaces (the doors hinged correctly — confirming the car-space convention +X front / ±Y sides / +Z up on the car-matrix path — while mirror/trunk pivots produced fly-offs on their paths).
+
+**Changes implemented**:
+- The damage evaluation now stores the **pure pivot-wobble matrix**; composition (`Wobble × Matrix`) happens at the shared render call against whichever matrix the block passes.
+- **Both generic block entries are hooked** (`0x624404` per-part-matrix path — restoring wobble while driving — and `0x624441` car-matrix path). The block A cave re-executes the replaced head instruction (`mov edx, [esp+0xE8]`, whose value feeds `or ecx,edx`) and preserves all registers via pushad/popad with the evaluate result smuggled through the saved-EAX slot.
+- **Detached parts are skipped inside the render hook** (no malloc, no leak) instead of via control-flow jumps.
+- **`[VehicleDamage]` INI section**: `WobbleScale` (global motion multiplier, default 0.7) and per-part hinge pivots (`PivotMirrorL/R`, `PivotExhaust`, `PivotTrunk`, `PivotDoorL/R` as `X, Y, Z`). A zero pivot rotates the part around its own centre — geometrically incapable of detaching. Defaults: doors keep the verified car-space hinge, mirrors/trunk ship conservative pivots that can be dialled in without rebuilding.
+
+### Fix Pass 3 — Continuous Flapping (PS2 Demo video reference)
+Testing against a PS2 Demo gameplay video (crash at ~8 s, then driving with damaged parts) and the report *"it's wobbling, not always stuck in a static rotation pos"* pinpointed the last behavioural gap: the previous angle formulas were **static droop + small ripple**, so damaged parts sat stuck at a fixed rotated pose. The demo's parts **continuously flap** around their hinge while driving.
+
+`ComputePartWobbleAngles` rewritten as centred oscillations:
+- **Doors** (parts 4/5): ~1.4 Hz open/close swing around the front hinge (amplitude 0.05 → 0.13 rad by stage) plus a fast rattle — the door flaps like a broken latch instead of hanging open.
+- **Trunk** (part 3): ~1.75 Hz pop-up/slam-down cycle (0.06 → 0.20 rad by stage).
+- **Mirrors** (parts 0/1): vibrate in place around zero (no droop, zero pivot by default — a wrong-hinge pivot had launched them off the car).
+- **Exhaust** (part 2): small sag + vibration, zero pivot by default.
+- **Trunk displaced off the car** (in-game screenshot): the trunk renders through a matrix space where the guessed car-space hinge (`-1.0, 0, 0.8`) does not apply — same failure class as the mirrors. Trunk pivot now defaults to zero (flaps in place, cannot displace). Policy: **only parts with a positively verified hinge keep a non-zero pivot** (currently the doors); all others default to rotate-in-place and can be tuned via the INI `Pivot*` keys.
+
+### Fix Pass 4 — Dual-Space Pivots
+Testing showed parts could still launch on the car-matrix render path: a **zero pivot there means rotating around the car's origin**, so a part ~2 m from the origin orbits it (`≈ 2 m · sin θ`) — reading exactly like "flying off". A zero pivot is only safe on the per-part-matrix path, where vertices sit near their own origin.
+
+The two paths now declare their matrix space through the block caves (`s_WobbleUseCarSpace`), and `EvaluatePartDamage` selects the pivot accordingly:
+- **Car-world-matrix path** (`0x624441` block): uses the configured car-space hinge from `[VehicleDamage] Pivot*` — proper hinges where known (doors `0.68, ±0.82, 0.22`, trunk `-1.05, 0, 0.85`).
+- **Per-part-matrix path** (`0x624404` block, used while driving): pivot **forced to zero** — parts rotate in place, geometrically incapable of detaching.
+
+Mirror sites keep zero pivots by default (their matrix space is unverified); a non-zero `PivotMirrorL/R` in the INI opts into a real hinge.
+
+### Fix Pass 5 — Dead Main-Loop Tick (root cause of dead hotkeys AND static wobble)
+**Symptoms**: F5/F6/F7 did nothing; damaged parts sat stuck at one static rotated pose (the "wobbling, not stuck" complaint).
+
+**Root cause**: the per-frame tick was hooked at `0x581470` — a `call __return` placeholder inside `MainLoop` (`0x5811C0`)'s tail. Disassembly showed `MainLoop` is a **state dispatcher with eleven early returns/branches before that point**: in the normal gameplay state, execution returns long before reaching the hook. Consequences: `GameTick` (hotkeys) never ran, `s_SimTime` stayed at 0 so every `sin()` wobble term was a constant — parts froze at one static pose — and the DemoCareer encounter cleanup never ran. (The damage pipeline kept working because its chain — `AddDamage` hooks, render hooks — is independent of the tick.)
+
+**Fix**: the tick moved to a **`MainLoop` entry hook** (`0x5811C0`, prologue `sub esp,0xC; push ebx; push edi` = exactly 5 bytes). A naked cave preserves all registers, runs `MainLoopTick()` (GameTick + module updates), re-executes the prologue and resumes at `0x5811C5`. The tick now runs every frame in every game state.
+
+**Verification hooks in the log**: `[+] Main loop tick alive - hotkeys F5/F6/F7 active` (first tick), `[HOTKEY] F5/F6 ...` on toggle, `[DAMAGE] F7 Hotkey: ...` on each damage-cycle press.
+
 
 

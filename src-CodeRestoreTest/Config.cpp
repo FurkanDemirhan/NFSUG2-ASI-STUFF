@@ -1,7 +1,17 @@
 #include "Config.h"
 #include "includes/IniReader.h"
+#include <cstdio>
 
 PluginConfig g_Config;
+
+static void ParsePivot(const char* value, float out[3])
+{
+    float x = 0.0f, y = 0.0f, z = 0.0f;
+    if (value && sscanf(value, "%f , %f , %f", &x, &y, &z) == 3)
+    {
+        out[0] = x; out[1] = y; out[2] = z;
+    }
+}
 
 void PluginConfig::Load(const char* iniPath)
 {
@@ -21,6 +31,17 @@ void PluginConfig::Load(const char* iniPath)
     unlockRegionalCars           = ini.ReadInteger("Cars", "UnlockRegionalCars", 1) != 0;
 
     restoreEncounterOpponentCleanup = ini.ReadInteger("DemoCareer", "RestoreEncounterOpponentCleanup", 1) != 0;
+
+    wobbleScale = ini.ReadFloat("VehicleDamage", "WobbleScale", 0.7f);
+    if (wobbleScale < 0.0f) wobbleScale = 0.0f;
+    if (wobbleScale > 3.0f) wobbleScale = 3.0f;
+
+    ParsePivot(ini.ReadString("VehicleDamage", "PivotMirrorL", "0.0, 0.0, 0.0"),  partPivots[0]);
+    ParsePivot(ini.ReadString("VehicleDamage", "PivotMirrorR", "0.0, 0.0, 0.0"), partPivots[1]);
+    ParsePivot(ini.ReadString("VehicleDamage", "PivotExhaust", "0.0, 0.0, 0.0"),   partPivots[2]);
+    ParsePivot(ini.ReadString("VehicleDamage", "PivotTrunk",   "-1.05, 0.0, 0.85"),  partPivots[3]);
+    ParsePivot(ini.ReadString("VehicleDamage", "PivotDoorL",   "0.68, 0.82, 0.22"), partPivots[4]);
+    ParsePivot(ini.ReadString("VehicleDamage", "PivotDoorR",   "0.68, -0.82, 0.22"), partPivots[5]);
 
     fixDisappearingWheels        = ini.ReadInteger("Fixes", "FixDisappearingWheels", 1) != 0;
     fixAudioPathCrash            = ini.ReadInteger("Fixes", "FixAudioPathCrash", 1) != 0;

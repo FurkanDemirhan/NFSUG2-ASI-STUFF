@@ -37,6 +37,17 @@ struct PluginConfig
     int  hotkeyDamageCycle             = 118; // F7
     bool enableHotkeys                 = true;
 
+    // Vehicle Damage tuning
+    float wobbleScale                  = 0.7f;
+    float partPivots[6][3] = {
+        {  0.00f,  0.00f,  0.00f },  // Part 0: Left Mirror (0 = vibrate in place)
+        {  0.00f,  0.00f,  0.00f },  // Part 1: Right Mirror (0 = vibrate in place)
+        {  0.00f,  0.00f,  0.00f },  // Part 2: Exhaust (0 = rotate in place)
+        {  -1.05f,  0.00f,  0.85f }, // Part 3: Trunk lid hinge (car-matrix path only)
+        {  0.68f,  0.82f,  0.22f },  // Part 4: Left Door hinge
+        {  0.68f, -0.82f,  0.22f }   // Part 5: Right Door hinge
+    };
+
     void Load(const char* iniPath);
 };
 

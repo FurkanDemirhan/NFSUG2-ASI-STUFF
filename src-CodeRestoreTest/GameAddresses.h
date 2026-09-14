@@ -12,7 +12,8 @@ namespace GameAddresses
     constexpr uintptr_t IsLostFocus        = 0x8709E0;   // bool
     constexpr uintptr_t PlayersByNumber    = 0x8900AC;   // Pointer to player array
     constexpr uintptr_t UnlockAllThings    = 0x838464;   // unsigned char
-    constexpr uintptr_t MainLoopHook       = 0x581470;   // call __return (0x4022C0)
+    constexpr uintptr_t MainLoopHook       = 0x581470;   // call __return (0x4022C0) - only reached in SOME MainLoop states!
+    constexpr uintptr_t MainLoopEntry      = 0x5811C0;   // MainLoop entry (per-frame, every state)
 
     // Functions
     inline uint32_t (*bStringHash)(const char* str) = (uint32_t (*)(const char*))0x43DB50;
