@@ -15,7 +15,13 @@ static void ParsePivot(const char* value, float out[3])
 
 void PluginConfig::Load(const char* iniPath)
 {
-    CIniReader ini(iniPath);
+    const char* filename = iniPath;
+    if (filename)
+    {
+        if (strncmp(filename, "scripts/", 8) == 0) filename += 8;
+        else if (strncmp(filename, "scripts\\", 8) == 0) filename += 8;
+    }
+    CIniReader ini(filename && filename[0] ? filename : "NFSU2CodeRestoration.ini");
 
     restoreDebugCarCustomize     = ini.ReadInteger("Restorations", "RestoreDebugCarCustomize", 1) != 0;
     restoreHiddenCameras         = ini.ReadInteger("Restorations", "RestoreHiddenCameras", 1) != 0;
@@ -32,7 +38,7 @@ void PluginConfig::Load(const char* iniPath)
 
     restoreEncounterOpponentCleanup = ini.ReadInteger("DemoCareer", "RestoreEncounterOpponentCleanup", 1) != 0;
 
-    wobbleScale = ini.ReadFloat("VehicleDamage", "WobbleScale", 0.7f);
+    wobbleScale = ini.ReadFloat("VehicleDamage", "WobbleScale", 1.0f);
     if (wobbleScale < 0.0f) wobbleScale = 0.0f;
     if (wobbleScale > 3.0f) wobbleScale = 3.0f;
 

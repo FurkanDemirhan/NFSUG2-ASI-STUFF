@@ -19,9 +19,9 @@ void InitRestorations()
     Logger::Init("NFSU2CodeRestoration.log");
     Logger::Log("[+] Target: SPEED2.EXE v1.2 US / NTSC (0x75BCC7)");
 
-    // Load configurations from scripts/NFSU2CodeRestoration.ini
-    g_Config.Load("scripts/NFSU2CodeRestoration.ini");
-    Logger::Log("[+] Configuration loaded from scripts/NFSU2CodeRestoration.ini");
+    // Load configurations from NFSU2CodeRestoration.ini
+    g_Config.Load("NFSU2CodeRestoration.ini");
+    Logger::Log("[+] Configuration loaded from NFSU2CodeRestoration.ini");
 
     if (g_Config.restoreDebugCarCustomize)
     {

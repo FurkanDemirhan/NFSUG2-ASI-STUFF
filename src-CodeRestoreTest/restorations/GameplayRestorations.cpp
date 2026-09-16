@@ -73,18 +73,17 @@ static void GameTick()
     s_DamageCycleWasDown = damageCycleDown;
 }
 
-// Per-frame tick. Runs from the MainLoop ENTRY hook (see Install below) so it executes in
-// EVERY game state and every frame. The previous hook point (0x581470, a __return
-// placeholder in MainLoop's tail) sits behind eleven early returns/state branches and was
-// never reached in the normal gameplay state - which killed the hotkeys and froze the
-// damage wobble clock (parts stuck at one static rotation).
+// Per-frame tick hook installed at 0x005814DB (dedicated unshared 'call __return' slot).
+// 0x5811C0 is only the function prologue of MainLoop() (called once by main() at boot),
+// whereas 0x5814DB sits inside the core while-loop and executes once per frame in every game state.
 extern "C" __cdecl void MainLoopTick()
 {
-    static bool s_TickLogged = false;
-    if (!s_TickLogged)
+    static int s_Ticks = 0;
+    s_Ticks++;
+    if (s_Ticks <= 5 || s_Ticks % 1200 == 0)
     {
-        s_TickLogged = true;
-        Logger::Log("[+] Main loop tick alive - hotkeys F5/F6/F7 active");
+        Logger::Log("[+] Main loop tick #%d alive (Flow=%d) - hotkeys F5/F6/F7 active", 
+                    s_Ticks, *(uint32_t*)GameAddresses::TheGameFlowManager);
     }
 
     GameTick();
@@ -99,29 +98,12 @@ extern "C" __cdecl void MainLoopTick()
     }
 }
 
-// Naked entry cave at 0x5811C0 (MainLoop): runs the tick, then executes the replaced
-// prologue ('sub esp,0xC; push ebx; push edi' - exactly 5 bytes) and resumes.
-__attribute__((naked)) static void MainLoopEntryCave()
-{
-    asm volatile (
-        ".intel_syntax noprefix\n"
-        "pushad\n"
-        "call _MainLoopTick\n"
-        "popad\n"
-        "sub esp, 0xC\n"
-        "push ebx\n"
-        "push edi\n"
-        "push 0x005811C5\n"
-        "ret\n"
-        ".att_syntax prefix\n"
-    );
-}
-
 namespace GameplayRestorations
 {
     void Install()
     {
-        // Hook the MainLoop ENTRY (0x5811C0) - per-frame in every game state.
-        injector::MakeJMP(GameAddresses::MainLoopEntry, (void*)MainLoopEntryCave, true);
+        // Hook 0x005814DB (dedicated 'call 0x4022c0' slot in MainLoop)
+        injector::MakeCALL(GameAddresses::MainLoopTickHook, (void*)MainLoopTick, true);
+        Logger::Log("[+] Main loop tick hook installed at 0x%08X", (unsigned int)GameAddresses::MainLoopTickHook);
     }
 }

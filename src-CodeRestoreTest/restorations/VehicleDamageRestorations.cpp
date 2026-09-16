@@ -49,9 +49,71 @@ namespace VehicleDamageRestorations
     };
 
     static float s_SimTime = 0.0f;
+    static float s_CurrentSpeedFactor = 0.0f;
     static int s_LogHits = 0;
     static int s_DiagEvals = 0;
     static int s_DiagRenders = 0;
+
+    // Helper to query player car speed
+    // Primary source: Car + 0x430 (authentic forward speed in m/s used by Tachometer::Update at 0x004C68D0)
+    static float GetPlayerVehicleSpeed()
+    {
+        void* player = *(void**)GameAddresses::PlayersByNumber;
+        void* car = nullptr;
+        if (player)
+            car = *(void**)((uintptr_t)player + 4);
+
+        if (!car)
+        {
+            uintptr_t world = *(uintptr_t*)0x00890080;
+            if (world && !IsBadReadPtr((void*)world, 0x20))
+            {
+                car = *(void**)(world + 0x1C);
+            }
+        }
+
+        if (!car || IsBadReadPtr(car, 0x440))
+            return 0.0f;
+
+        // Primary: authentic forward speed in m/s directly from Car + 0x430 (used by speedometer in all driving modes)
+        float speed = std::abs(*(float*)((uintptr_t)car + 0x430));
+        if (speed >= 0.01f && speed < 300.0f)
+            return speed;
+
+        // Fallback 1: check SimVehicle (Car + 0x1C) velocity
+        uintptr_t simVehicle = *(uintptr_t*)((uintptr_t)car + 0x1C);
+        if (simVehicle && !IsBadReadPtr((void*)simVehicle, 0x440))
+        {
+            float simSpeed = std::abs(*(float*)(simVehicle + 0x430));
+            if (simSpeed >= 0.01f && simSpeed < 300.0f)
+                return simSpeed;
+        }
+
+        // Fallback 2: RigidBody velocity
+        uintptr_t rigidBody = *(uintptr_t*)((uintptr_t)car + 0x2C);
+        if (!rigidBody || rigidBody < 0x00400000 || rigidBody > 0x7FFFFFFF)
+        {
+            uintptr_t mover = *(uintptr_t*)((uintptr_t)car + 0x34);
+            if (mover && mover >= 0x00400000 && mover < 0x7FFFFFFF)
+                rigidBody = *(uintptr_t*)(mover + 0x20);
+        }
+
+        if (rigidBody && rigidBody >= 0x00400000 && rigidBody <= 0x7FFFFFFF && !IsBadReadPtr((void*)rigidBody, 0x80))
+        {
+            float vx = *(float*)(rigidBody + 0x70);
+            float vy = *(float*)(rigidBody + 0x74);
+            float vz = *(float*)(rigidBody + 0x78);
+            float rbSpeed = std::sqrt(vx * vx + vy * vy + vz * vz);
+            if (rbSpeed >= 0.01f && rbSpeed < 300.0f)
+                return rbSpeed;
+
+            float speed2d = *(float*)(rigidBody + 0x24);
+            if (speed2d >= 0.01f && speed2d < 300.0f)
+                return speed2d;
+        }
+
+        return speed;
+    }
 
     // Function pointer for eViewPlatInterface::Render (0x005C5930)
     typedef void (__thiscall* MeshRenderFn)(void* eViewPlat, void* model, bMatrix4* mtx, void* lightCtx, uint32_t flags, uint32_t flags2);
@@ -67,13 +129,16 @@ namespace VehicleDamageRestorations
 
     // Dedicated per-part wobbled matrix buffers (prevents any cross-part matrix collisions)
     static bMatrix4 s_PartWobbleMatrix[6];
+    static bMatrix4 s_ComposedRenderMatrix;
+    static int s_ActivePartIndex = -1;
+    static bVector3 s_ActivePartAngles = { 0.0f, 0.0f, 0.0f };
 
     // Render-time wobble state, consumed by the shared mesh render hook
     extern "C" {
         uintptr_t s_CurrentCollisionBody = 0;
         bMatrix4* s_ActiveWobbleMatrix = nullptr;   // pure pivot wobble (pre-multiply)
         bool s_SkipPartRender = false;              // detached: skip this part's draw
-        int s_WobbleUseCarSpace = 0;                // 1 = car-world matrix path (car-space hinge),
+        int s_WobbleUseCarSpace = 1;                // 1 = car-world matrix path (car-space hinge),
                                                     // 0 = per-part matrix path (part-local, zero pivot)
     }
 
@@ -237,63 +302,109 @@ namespace VehicleDamageRestorations
     }
 
     // 5. Physical Wobble Angle Calculation for all 6 vehicle damage parts.
-    // Matches the PS2 Demo's behaviour (see the demo gameplay video): damaged parts
-    // CONTINUOUSLY FLAP around their hinge - doors swing open and closed, the trunk pops
-    // up and slams down, mirrors buzz - instead of sitting stuck at a static angle.
-    // Every angle is a centred oscillation (sin cycles) scaled by the damage stage.
+    // Wobbling is strictly speed-dependent: parts remain flush and stationary when the car is
+    // stopped (< 0.5 m/s), and smoothly scale their oscillation as the vehicle accelerates.
+    // Frequencies and amplitudes are modeled after authentic beta/PS2 demo keyframe kinematics:
+    //   - Trunk: pure vertical pitch (Y) bounce, popping open by 8° to 22° and slamming shut
+    //   - Doors: pure outward yaw (Z) swing around front A-pillar hinges, opening 7° to 18°
+    //   - Mirrors: subtle rotational shudder (fixed to door, only rotates in place)
+    //   - Exhaust: realistic downward sag with side-to-side rattle
     static void ComputePartWobbleAngles(int partIndex, float stage, bVector3* outAngles)
     {
         outAngles->x = 0.0f;
         outAngles->y = 0.0f;
         outAngles->z = 0.0f;
 
-        if (stage <= 0.0f) return;
+        if (stage <= 0.0f || s_CurrentSpeedFactor <= 0.001f)
+            return;
 
         float t = s_SimTime;
         float scale = g_Config.wobbleScale;
         float s = stage - 1.0f; // 0..2 progressive amplitude factor
+        float spd = s_CurrentSpeedFactor;
 
-        // flapCycle: 0..1..0 slow swing (the part opens and closes repeatedly)
-        // rattle:    fast high-frequency vibration on top
-        float flapDoor  = std::sin(t * 9.0f) * 0.5f + 0.5f;        // ~1.4 Hz
-        float flapTrunk = std::sin(t * 11.0f) * 0.5f + 0.5f;       // ~1.75 Hz
+        // Kinematics derived from authentic PARTS_ANIMATIONS.bin and PS2 beta footage:
+        // Door and trunk unlatch and bounce/flap rhythmically with airflow and bumps.
+        // Part flaps open outward, reaches peak apex, and accelerates back to slam against frame.
+        // Opening angles are bounded well below full extension (trunk full is 53.19°, door full is 37.45°).
 
         switch (partIndex)
         {
-        case 0: // Left Mirror - buzzes/vibrates in place
+        case 0: // Left Mirror - aerodynamic vibration in place on its door mount (pure rotation)
         {
-            outAngles->x = std::sin(t * 27.0f) * 0.06f * stage * scale;
-            outAngles->z = std::sin(t * 33.0f + 0.8f) * 0.05f * stage * scale;
+            outAngles->x = std::sin(t * 14.0f) * 0.045f * stage * scale * spd;
+            outAngles->y = std::sin(t * 12.0f + 1.2f) * 0.025f * stage * scale * spd;
+            outAngles->z = std::sin(t * 16.5f + 0.7f) * 0.040f * stage * scale * spd;
             break;
         }
-        case 1: // Right Mirror - buzzes/vibrates in place
+        case 1: // Right Mirror - aerodynamic vibration in place on its door mount (pure rotation)
         {
-            outAngles->x = std::sin(t * 29.0f + 1.1f) * 0.06f * stage * scale;
-            outAngles->z = -std::sin(t * 31.0f + 1.7f) * 0.05f * stage * scale;
+            outAngles->x = std::sin(t * 15.0f + 1.1f) * 0.045f * stage * scale * spd;
+            outAngles->y = -std::sin(t * 12.5f + 0.5f) * 0.025f * stage * scale * spd;
+            outAngles->z = -std::sin(t * 16.0f + 1.7f) * 0.040f * stage * scale * spd;
             break;
         }
-        case 2: // Exhaust - sags slightly and vibrates
+        case 2: // Exhaust - downward pitch sag and lateral rattle
         {
-            outAngles->y = (-(0.03f + 0.025f * s) + std::sin(t * 19.0f) * 0.03f * stage) * scale;
-            outAngles->z = std::sin(t * 26.0f + 0.4f) * 0.035f * stage * scale;
+            outAngles->y = (-(0.045f + 0.035f * s) + std::sin(t * 8.0f) * 0.015f * stage) * scale * spd;
+            outAngles->z = std::sin(t * 9.0f + 0.4f) * 0.020f * stage * scale * spd;
+            outAngles->x = 0.0f;
             break;
         }
-        case 3: // Trunk Lid - pops up and slams down repeatedly
+        case 3: // Trunk Lid - pops up vertically along rear window seam and slams shut
         {
-            outAngles->y = (flapTrunk * (0.06f + 0.07f * s) + std::sin(t * 17.0f) * 0.02f * stage) * scale;
-            outAngles->x = std::sin(t * 21.0f) * 0.015f * stage * scale;
+            // Pure pitch around transverse Y-axis in car space (hinge seam under rear window).
+            // Rotation around Y ensures purely vertical lift/drop in the X-Z plane with zero lateral shift (Y' == Y).
+            // Under damage wobbling, trunk unlatches and bounces rhythmically:
+            //   Stage 1: opens ~17° (0.30 rad, gap ~24 cm) and slams shut
+            //   Stage 2: opens ~26° (0.46 rad, gap ~36 cm) and slams shut
+            //   Stage 3: opens ~35° (0.62 rad, gap ~48 cm) and slams shut
+            float phaseTrunk = t * 5.2f;
+            float sTrunk = std::sin(phaseTrunk);
+            float liftTrunk = (sTrunk > 0.0f) ? std::pow(sTrunk, 1.6f) : 0.0f;
+            float peakTrunk = 0.14f + 0.16f * stage; // 0.30 rad, 0.46 rad, 0.62 rad
+            float rattleTrunk = (sTrunk <= 0.0f) ? (std::sin(phaseTrunk * 6.0f) * 0.010f * stage) : 0.0f;
+
+            outAngles->x = 0.0f;
+            outAngles->y = (liftTrunk * peakTrunk + std::abs(rattleTrunk)) * scale * spd;
+            outAngles->z = 0.0f;
             break;
         }
-        case 4: // Left Door - flaps open and closed around the front hinge
+        case 4: // Left Door - flaps open outward into the street and slams shut
         {
-            outAngles->z = -(flapDoor * (0.05f + 0.08f * s) + std::sin(t * 22.0f) * 0.02f * stage) * scale;
-            outAngles->x = std::sin(t * 28.0f) * 0.012f * stage * scale;
+            // Pure yaw (Z-axis) around vertical A-pillar hinge.
+            // Negative Z angle rotates counter-clockwise viewed from above, swinging the left door OUTWARD into the street (delta Y > 0).
+            // Full opening in PARTS_ANIMATIONS.bin is 37.45° (0.654 rad).
+            // Under damage wobbling:
+            //   Stage 1: swings open ~13° (0.22 rad, gap ~21 cm) and slams shut
+            //   Stage 2: swings open ~19° (0.34 rad, gap ~33 cm) and slams shut
+            //   Stage 3: swings open ~26° (0.46 rad, gap ~44 cm) and slams shut
+            float phaseDoor = t * 4.6f;
+            float sDoor = std::sin(phaseDoor);
+            float swingDoor = (sDoor > 0.0f) ? std::pow(sDoor, 1.5f) : 0.0f;
+            float peakDoor = 0.10f + 0.12f * stage; // 0.22 rad, 0.34 rad, 0.46 rad
+            float rattleDoor = (sDoor <= 0.0f) ? (std::sin(phaseDoor * 5.0f) * 0.008f * stage) : 0.0f;
+            float doorAngle = (swingDoor * peakDoor + std::abs(rattleDoor)) * scale * spd;
+
+            outAngles->x = 0.0f;
+            outAngles->y = 0.0f;
+            outAngles->z = -doorAngle; // Negative Z swings left door outward to the left into the road
             break;
         }
-        case 5: // Right Door - flaps open and closed around the front hinge
+        case 5: // Right Door - flaps open outward into the street and slams shut
         {
-            outAngles->z = (flapDoor * (0.05f + 0.08f * s) + std::sin(t * 23.0f + 0.6f) * 0.02f * stage) * scale;
-            outAngles->x = std::sin(t * 27.0f + 0.7f) * 0.012f * stage * scale;
+            // Pure yaw (Z-axis) around vertical A-pillar hinge.
+            // Positive Z angle rotates clockwise viewed from above, swinging the right door OUTWARD into the street (delta Y < 0).
+            float phaseDoor = t * 4.6f + 0.7f;
+            float sDoor = std::sin(phaseDoor);
+            float swingDoor = (sDoor > 0.0f) ? std::pow(sDoor, 1.5f) : 0.0f;
+            float peakDoor = 0.10f + 0.12f * stage; // 0.22 rad, 0.34 rad, 0.46 rad
+            float rattleDoor = (sDoor <= 0.0f) ? (std::sin(phaseDoor * 5.0f) * 0.008f * stage) : 0.0f;
+            float doorAngle = (swingDoor * peakDoor + std::abs(rattleDoor)) * scale * spd;
+
+            outAngles->x = 0.0f;
+            outAngles->y = 0.0f;
+            outAngles->z = doorAngle; // Positive Z swings right door outward to the right into the road
             break;
         }
         default:
@@ -301,19 +412,13 @@ namespace VehicleDamageRestorations
         }
     }
 
-    // 6. Damage evaluation for the generic part render blocks. Returns 0 = intact,
-    // 1 = wobbling (s_ActiveWobbleMatrix holds the pure pivot wobble to pre-multiply at
-    // the render call), 2 = detached (s_SkipPartRender set; the render hook skips the draw).
-    //
-    // The pivot space depends on which block is rendering (s_WobbleUseCarSpace, set by the
-    // block caves): the car-world-matrix block transforms car-space vertices, so the
-    // configured car-space hinge applies; the per-part-matrix block transforms part-local
-    // vertices near their own origin, so the pivot MUST be zero (a non-zero pivot there
-    // orbits the part around a distant point and it launches off the car).
+    // 6. Damage evaluation for both generic part render blocks (0x00624404 and 0x00624441).
+    // Returns 0 = intact, 1 = wobbling, 2 = detached.
     extern "C" int EvaluatePartDamage(int partIndex, uintptr_t carDamage)
     {
         s_ActiveWobbleMatrix = nullptr;
         s_SkipPartRender = false;
+        s_ActivePartIndex = -1;
 
         if (!carDamage || partIndex < 0 || partIndex > 5)
         {
@@ -327,6 +432,14 @@ namespace VehicleDamageRestorations
 
         float* dmgArray = (float*)(carDamage + 0x120);
         float dmg = dmgArray[partIndex];
+
+        // For mirrors (parts 0 and 1), check parent door detachment
+        int parentDoor = (partIndex == 0) ? 4 : (partIndex == 1 ? 5 : -1);
+        if (parentDoor != -1 && dmgArray[parentDoor] >= 4.0f)
+        {
+            s_SkipPartRender = true;
+            return 2;
+        }
 
         if (s_DiagEvals < 30)
         {
@@ -342,18 +455,47 @@ namespace VehicleDamageRestorations
         }
 
         // Wobbling threshold: 0.25f (engine-native IsPartDamaged threshold)
-        if (dmg >= 0.25f)
+        // Or if this is a mirror and its parent door is wobbling:
+        bool partWobbles = (dmg >= 0.25f);
+        bool parentWobbles = (parentDoor != -1 && dmgArray[parentDoor] >= 0.25f);
+
+        if ((partWobbles || parentWobbles) && s_CurrentSpeedFactor > 0.001f)
         {
             static const float zeroPivot[3] = { 0.0f, 0.0f, 0.0f };
+            bMatrix4 currentWobble;
+            for (int i = 0; i < 4; ++i)
+                for (int j = 0; j < 4; ++j)
+                    currentWobble.m[i][j] = (i == j) ? 1.0f : 0.0f;
 
-            float stage = (dmg >= 2.0f) ? 3.0f : ((dmg >= 1.0f) ? 2.0f : 1.0f);
-            bVector3 angles;
-            ComputePartWobbleAngles(partIndex, stage, &angles);
+            if (partWobbles)
+            {
+                float stage = (dmg >= 2.0f) ? 3.0f : ((dmg >= 1.0f) ? 2.0f : 1.0f);
+                ComputePartWobbleAngles(partIndex, stage, &s_ActivePartAngles);
 
-            // Car-world-matrix path: vertices are car-space -> configured car-space hinge.
-            // Per-part-matrix path: vertices are part-local -> rotate in place (zero pivot).
-            const float* pivot = s_WobbleUseCarSpace ? g_Config.partPivots[partIndex] : zeroPivot;
-            BuildPivotWobbleMatrix(pivot, &angles, &s_PartWobbleMatrix[partIndex]);
+                // Mirrors strictly use zeroPivot (pure rotation, zero translation)
+                const float* pivot = (partIndex == 0 || partIndex == 1 || !s_WobbleUseCarSpace)
+                    ? zeroPivot
+                    : g_Config.partPivots[partIndex];
+
+                BuildPivotWobbleMatrix(pivot, &s_ActivePartAngles, &currentWobble);
+            }
+
+            if (parentWobbles)
+            {
+                float doorStage = (dmgArray[parentDoor] >= 2.0f) ? 3.0f : ((dmgArray[parentDoor] >= 1.0f) ? 2.0f : 1.0f);
+                bVector3 doorAngles;
+                ComputePartWobbleAngles(parentDoor, doorStage, &doorAngles);
+
+                bMatrix4 doorWobbleMtx;
+                BuildPivotWobbleMatrix(g_Config.partPivots[parentDoor], &doorAngles, &doorWobbleMtx);
+
+                bMatrix4 temp;
+                MultiplyMatrices(&temp, &doorWobbleMtx, &currentWobble);
+                currentWobble = temp;
+            }
+
+            s_ActivePartIndex = partIndex;
+            s_PartWobbleMatrix[partIndex] = currentWobble;
             s_ActiveWobbleMatrix = &s_PartWobbleMatrix[partIndex];
             return 1;
         }
@@ -361,11 +503,30 @@ namespace VehicleDamageRestorations
         return 0;
     }
 
-    // 7. Naked code caves at the two generic part render block entries.
-    // They run the damage evaluation before the block executes; the block then falls
-    // through to the shared eMesh::Render call where the wobble matrix is composed with
-    // whichever matrix that block passes (car-world at 0x624441, per-part at 0x624404).
-    // Detached parts are skipped inside the render hook - no malloc, no leak.
+    // 7a. Naked code cave at the per-part matrix render block entry (0x00624404).
+    // Executed during manual player driving when the game evaluates per-part matrices.
+    // Preserves stack and registers, runs damage evaluation, and restores the original instruction.
+    __attribute__((naked)) static void PartBlock_PerPartMatrix_Cave() // 0x00624404
+    {
+        asm volatile (
+            ".intel_syntax noprefix\n"
+            "pushad\n"
+            "mov dword ptr _s_WobbleUseCarSpace, 0\n"
+            "push dword ptr [esp + 0x180 + 32]\n"   // carDamage = orig [esp+0x180]
+            "push dword ptr [esp + 0x64 + 32 + 4]\n"// partIndex = orig [esp+0x64]
+            "call _EvaluatePartDamage\n"
+            "add esp, 8\n"
+            "mov [esp + 0x1C], eax\n"               // store result into saved EAX slot
+            "popad\n"
+            "mov edx, dword ptr [esp + 0xE8]\n"     // restored replaced instruction
+            "push 0x0062440B\n"
+            "ret\n"
+            ".att_syntax prefix\n"
+        );
+    }
+
+    // 7b. Naked code cave at the generic part render block entry (0x00624441).
+    // Executed during auto-drive or single car-matrix rendering passes.
     __attribute__((naked)) static void PartBlock_CarMatrix_Cave() // 0x00624441
     {
         asm volatile (
@@ -384,26 +545,7 @@ namespace VehicleDamageRestorations
         );
     }
 
-    __attribute__((naked)) static void PartBlock_PerPartMatrix_Cave() // 0x00624404
-    {
-        asm volatile (
-            ".intel_syntax noprefix\n"
-            "pushad\n"
-            "mov dword ptr _s_WobbleUseCarSpace, 0\n" // this block passes a per-part matrix
-            "push dword ptr [esp + 0x180 + 32]\n"   // carDamage = orig [esp+0x180]
-            "push dword ptr [esp + 0x6C + 32 + 4]\n"// partIndex = orig [esp+0x6C]
-            "call _EvaluatePartDamage\n"
-            "add esp, 8\n"
-            "mov [esp + 0x1C], eax\n"               // store result into saved EAX slot
-            "popad\n"
-            "mov edx, dword ptr [esp + 0xE8]\n"     // re-execute the replaced original instruction
-            "push 0x0062440B\n"                     // resume the original block
-            "ret\n"
-            ".att_syntax prefix\n"
-        );
-    }
-
-    // 8. Shared mesh render hook at 0x00624499 (both generic part blocks funnel here).
+    // 8. Shared mesh render hook at 0x00624499.
     // Applies the active wobble matrix, or skips the draw entirely for detached parts.
     void __thiscall Hooked_BreakablePartMeshRender(void* eView, void* model, bMatrix4* mtx, void* lightCtx, uint32_t flags, uint32_t flags2)
     {
@@ -411,6 +553,7 @@ namespace VehicleDamageRestorations
         {
             s_SkipPartRender = false;
             s_ActiveWobbleMatrix = nullptr;
+            s_ActivePartIndex = -1;
             if (s_DiagRenders < 15)
             {
                 s_DiagRenders++;
@@ -422,20 +565,21 @@ namespace VehicleDamageRestorations
         bMatrix4* actualMtx = mtx;
         if (s_ActiveWobbleMatrix && mtx)
         {
-            MultiplyMatrices(&s_PartWobbleMatrix[5], s_ActiveWobbleMatrix, mtx);
-            actualMtx = &s_PartWobbleMatrix[5];
+            MultiplyMatrices(&s_ComposedRenderMatrix, s_ActiveWobbleMatrix, mtx);
+            actualMtx = &s_ComposedRenderMatrix;
         }
 
         if (s_DiagRenders < 15 && mtx)
         {
             s_DiagRenders++;
-            Logger::Log("[DIAG] Render: wobble=%s mtxT=(%.1f, %.1f, %.1f) row0=(%.2f, %.2f, %.2f)",
+            Logger::Log("[DIAG] Render: part=%d wobble=%s mtxT=(%.1f, %.1f, %.1f)",
+                s_ActivePartIndex,
                 s_ActiveWobbleMatrix ? "YES" : "no",
-                mtx->m[3][0], mtx->m[3][1], mtx->m[3][2],
-                mtx->m[0][0], mtx->m[0][1], mtx->m[0][2]);
+                mtx->m[3][0], mtx->m[3][1], mtx->m[3][2]);
         }
 
         s_ActiveWobbleMatrix = nullptr;
+        s_ActivePartIndex = -1;
         s_OrigMeshRender(eView, model, actualMtx, lightCtx, flags, flags2);
     }
 
@@ -468,30 +612,68 @@ namespace VehicleDamageRestorations
         );
     }
 
-    // 10. Left Mirror and Right Mirror mesh render hooks. The mirror blocks pass their own
-    // matrix (space unverified), so the mirrors always vibrate with a zero pivot - they can
-    // never detach. Set PivotMirrorL/R in the INI to experiment with a real hinge.
+    // 10. Left Mirror and Right Mirror mesh render hooks.
+    // Mirrors are physically attached to the driver and passenger doors.
+    // When the doors swing open, mirrors swing along with them.
+    // If the parent door detaches, the mirror detaches as well.
+    // When wobbling on their own, mirrors strictly rotate in place (zero translation).
     static void RenderMirrorWithWobble(int partIndex, float damageOffset, void* eViewPlat, void* model, bMatrix4* mtx, void* lightCtx, uint32_t flags, uint32_t flags2)
     {
         bMatrix4* renderMtx = mtx;
         if (s_CurrentCollisionBody && mtx)
         {
-            float dmg = *(float*)(s_CurrentCollisionBody + (uintptr_t)damageOffset);
-            if (dmg < 4.0f && dmg >= 0.25f)
+            int doorIndex = (partIndex == 0) ? 4 : 5;
+            float* dmgArray = (float*)(s_CurrentCollisionBody + 0x120);
+            float doorDmg = dmgArray[doorIndex];
+            float mirrorDmg = dmgArray[partIndex];
+
+            // 1. If parent door is detached, mirror has detached with the door
+            if (doorDmg >= 4.0f)
+                return;
+
+            // 2. If mirror itself is detached, do not render
+            if (mirrorDmg >= 4.0f)
+                return;
+
+            bMatrix4 currentMtx = *mtx;
+            bool modified = false;
+
+            // 3. If mirror itself is wobbling, apply pure local rotation (strictly {0,0,0} pivot)
+            if (mirrorDmg >= 0.25f && s_CurrentSpeedFactor > 0.001f)
             {
-                float stage = (dmg >= 2.0f) ? 3.0f : ((dmg >= 1.0f) ? 2.0f : 1.0f);
-                bVector3 angles;
-                ComputePartWobbleAngles(partIndex, stage, &angles);
+                float stage = (mirrorDmg >= 2.0f) ? 3.0f : ((mirrorDmg >= 1.0f) ? 2.0f : 1.0f);
+                bVector3 mirrorAngles;
+                ComputePartWobbleAngles(partIndex, stage, &mirrorAngles);
 
                 static const float zeroPivot[3] = { 0.0f, 0.0f, 0.0f };
-                const float* pivot = (g_Config.partPivots[partIndex][0] != 0.0f ||
-                                      g_Config.partPivots[partIndex][1] != 0.0f ||
-                                      g_Config.partPivots[partIndex][2] != 0.0f)
-                                         ? g_Config.partPivots[partIndex]
-                                         : zeroPivot;
-                bMatrix4 wobbleMtx;
-                BuildPivotWobbleMatrix(pivot, &angles, &wobbleMtx);
-                MultiplyMatrices(&s_PartWobbleMatrix[partIndex], &wobbleMtx, mtx);
+                bMatrix4 mirrorWobbleMtx;
+                BuildPivotWobbleMatrix(zeroPivot, &mirrorAngles, &mirrorWobbleMtx);
+
+                bMatrix4 temp;
+                MultiplyMatrices(&temp, &mirrorWobbleMtx, &currentMtx);
+                currentMtx = temp;
+                modified = true;
+            }
+
+            // 4. If parent door is wobbling/flapping, swing the mirror along with the door
+            if (doorDmg >= 0.25f && s_CurrentSpeedFactor > 0.001f)
+            {
+                float doorStage = (doorDmg >= 2.0f) ? 3.0f : ((doorDmg >= 1.0f) ? 2.0f : 1.0f);
+                bVector3 doorAngles;
+                ComputePartWobbleAngles(doorIndex, doorStage, &doorAngles);
+
+                bMatrix4 doorWobbleMtx;
+                BuildPivotWobbleMatrix(g_Config.partPivots[doorIndex], &doorAngles, &doorWobbleMtx);
+
+                bMatrix4 temp;
+                MultiplyMatrices(&temp, &doorWobbleMtx, &currentMtx);
+                currentMtx = temp;
+                modified = true;
+            }
+
+            if (modified)
+            {
+                s_PartWobbleMatrix[partIndex] = currentMtx;
                 renderMtx = &s_PartWobbleMatrix[partIndex];
             }
         }
@@ -580,18 +762,16 @@ namespace VehicleDamageRestorations
         injector::MakeJMP(0x0062109C, (void*)CaptureCurrentCollisionBodyCodeCave, true);
         injector::MakeNOP(0x0062109C + 5, 2, true);
 
-        // 12. Hook BOTH generic part render blocks:
-        //     0x00624404 (per-part matrix path - used while driving)
-        //     0x00624441 (car-world matrix path); original head 'mov eax,[esp+0x64]' is 4
-        //     bytes, the cave replaces the whole vanilla IsPartDamaged/malloc/skip flow.
+        // 12a. Hook generic part render block for per-part matrix (manual player driving path at 0x00624404)
         injector::MakeJMP(0x00624404, (void*)PartBlock_PerPartMatrix_Cave, true);
-        injector::MakeNOP(0x00624404 + 5, 2, true); // tail of 'mov edx,[esp+0xE8]' (7 bytes)
+        injector::MakeNOP(0x00624404 + 5, 2, true); // 0x62440B - 0x624409 = 2 bytes
 
+        // 12b. Hook generic part render block for car matrix (auto drive / LOD path at 0x00624441)
         injector::MakeJMP(0x00624441, (void*)PartBlock_CarMatrix_Cave, true);
         injector::MakeNOP(0x00624441 + 5, 36, true); // 0x62446A - 0x624446 = 36 bytes
 
         // 13. Hook the shared mesh render call at 0x00624499: composes the wobble matrix
-        //     with whichever matrix the block passes, skips detached parts
+        //     with the car-world matrix, skips detached parts
         injector::MakeCALL(0x00624499, (void*)Hooked_BreakablePartMeshRender, true);
 
         // 14. Fix Left Mirror detachment threshold (0x006264F6) to compare against 4.0f (0x00803940)
@@ -603,8 +783,9 @@ namespace VehicleDamageRestorations
         // 16. Fix Right Mirror detachment threshold (0x00626A67) to compare against 4.0f (0x00803940)
         injector::WriteMemory<uint32_t>(0x00626A67, 0x00803940, true);
 
-        // 17. Hook Right Mirror mesh render call at 0x00626FED for dynamic wobbling
+        // 17. Hook Right Mirror mesh render calls at 0x00626FED and 0x00626F65 for dynamic wobbling
         injector::MakeCALL(0x00626FED, (void*)Hooked_RenderRightMirrorMesh, true);
+        injector::MakeCALL(0x00626F65, (void*)Hooked_RenderRightMirrorMesh, true);
 
         // 18. Initialize collision weights table
         InitDamageWeightsTable();
@@ -616,7 +797,28 @@ namespace VehicleDamageRestorations
 
     void Update(float dt)
     {
-        s_SimTime += dt;
+        float speed = GetPlayerVehicleSpeed();
+        // Speed threshold: stationary under 0.5 m/s (~1.8 km/h)
+        if (speed < 0.5f)
+        {
+            s_CurrentSpeedFactor = 0.0f;
+        }
+        else
+        {
+            // Smoothly scale from 0.5 m/s (0.0) to 6.0 m/s (~21 km/h, 1.0)
+            s_CurrentSpeedFactor = std::clamp((speed - 0.5f) / 5.5f, 0.0f, 1.0f);
+            s_SimTime += dt * (0.5f + 0.5f * s_CurrentSpeedFactor);
+        }
+
+        static float s_LastLogTime = 0.0f;
+        s_LastLogTime += dt;
+        if (s_LastLogTime >= 3.0f)
+        {
+            s_LastLogTime = 0.0f;
+            Logger::Log("[SPEED] Player car speed: %.2f m/s (%.1f km/h), speedFactor: %.2f",
+                speed, speed * 3.6f, s_CurrentSpeedFactor);
+        }
+
         *(uint8_t*)0x0089E7D2 = 1;
     }
 

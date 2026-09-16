@@ -38,7 +38,7 @@ struct PluginConfig
     bool enableHotkeys                 = true;
 
     // Vehicle Damage tuning
-    float wobbleScale                  = 0.7f;
+    float wobbleScale                  = 1.0f;
     float partPivots[6][3] = {
         {  0.00f,  0.00f,  0.00f },  // Part 0: Left Mirror (0 = vibrate in place)
         {  0.00f,  0.00f,  0.00f },  // Part 1: Right Mirror (0 = vibrate in place)
